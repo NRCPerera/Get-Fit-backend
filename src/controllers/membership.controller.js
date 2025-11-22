@@ -106,9 +106,10 @@ const purchaseMembership = async (req, res, next) => {
     });
 
     // Initialize PayHere payment
-    // PayHere requires HTTP/HTTPS URLs
+    // PayHere requires HTTPS URLs for return/cancel (sandbox accepts HTTP but production requires HTTPS)
     // Payment status will be updated via webhook, app will check status
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${config.PORT}`;
+    // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
+    const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
     
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,

@@ -81,18 +81,44 @@ class PayHereService {
     // Note: email and phone are REQUIRED by PayHere, so we must provide default values if missing
     // IMPORTANT: PayHere sandbox does NOT accept localhost URLs - use ngrok or a public URL
     
-    // Determine URLs - PayHere sandbox requires publicly accessible URLs
-    // Priority: 1. Explicit returnUrl/cancelUrl/notifyUrl, 2. BACKEND_URL env var, 3. CLIENT_URL, 4. localhost fallback
-    const defaultBaseUrl = process.env.BACKEND_URL || config.CLIENT_URL || `http://localhost:${config.PORT}`;
-    const finalReturnUrl = returnUrl || `${defaultBaseUrl}/payment/return`;
-    const finalCancelUrl = cancelUrl || `${defaultBaseUrl}/payment/cancel`;
-    const finalNotifyUrl = notifyUrl || `${defaultBaseUrl}/api/v1/payments/payhere-notify`;
+    // Determine URLs - PayHere sandbox requires publicly accessible HTTPS URLs
+    // Priority: 1. Explicit returnUrl/cancelUrl/notifyUrl, 2. BACKEND_URL config, 3. CLIENT_URL, 4. localhost fallback
+    const defaultBaseUrl = config.BACKEND_URL || config.CLIENT_URL || `http://localhost:${config.PORT}`;
     
-    // Warn if using localhost in sandbox mode
+    // Ensure we use HTTPS for production (PayHere requires HTTPS for production)
+    let baseUrl = defaultBaseUrl;
+    if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
+      // Localhost is fine for development
+      baseUrl = defaultBaseUrl;
+    } else if (!baseUrl.startsWith('https://') && !baseUrl.startsWith('http://')) {
+      // Add https:// if protocol is missing
+      baseUrl = `https://${baseUrl}`;
+    } else if (config.NODE_ENV === 'production' && baseUrl.startsWith('http://')) {
+      // Force HTTPS in production (PayHere requires HTTPS)
+      baseUrl = baseUrl.replace('http://', 'https://');
+    }
+    
+    const finalReturnUrl = returnUrl || `${baseUrl}/payment/return`;
+    const finalCancelUrl = cancelUrl || `${baseUrl}/payment/cancel`;
+    const finalNotifyUrl = notifyUrl || `${baseUrl}/api/v1/payments/payhere-notify`;
+    
+    // Warn if using localhost in sandbox mode (PayHere sandbox may still reject localhost)
     if (this.isSandbox && (finalReturnUrl.includes('localhost') || finalCancelUrl.includes('localhost') || finalNotifyUrl.includes('localhost'))) {
-      console.warn('⚠️  WARNING: PayHere sandbox does NOT accept localhost URLs!');
-      console.warn('⚠️  Use ngrok or set BACKEND_URL in .env to a public URL (e.g., https://your-ngrok-url.ngrok.io)');
-      console.warn('⚠️  This will cause payment requests to fail with error codes like 480122112531');
+      console.warn('⚠️  WARNING: PayHere sandbox may not accept localhost URLs!');
+      console.warn('⚠️  Set BACKEND_URL environment variable to your Render.com URL');
+      console.warn('⚠️  Example: BACKEND_URL=https://get-fit-backend-mpk7.onrender.com');
+      console.warn('⚠️  This may cause payment requests to fail with error codes like 480122112531');
+    }
+    
+    // Log the URLs being used for debugging
+    if (this.isSandbox) {
+      console.log('PayHere URL Configuration:', {
+        backendUrl: config.BACKEND_URL,
+        baseUrl: baseUrl,
+        returnUrl: finalReturnUrl,
+        cancelUrl: finalCancelUrl,
+        notifyUrl: finalNotifyUrl
+      });
     }
     
     const params = {

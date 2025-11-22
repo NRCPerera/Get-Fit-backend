@@ -84,11 +84,11 @@ const createPaymentIntent = async (req, res, next) => {
     });
 
     // Initialize PayHere payment
-    // PayHere requires HTTP/HTTPS URLs for return/cancel
+    // PayHere requires HTTPS URLs for return/cancel (sandbox accepts HTTP but production requires HTTPS)
     // For mobile apps, payment status is updated via webhook
     // App will check payment status when user returns
-    // Using backend URL as return URL (PayHere requires valid HTTP URL)
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${config.PORT}`;
+    // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
+    const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
     
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
@@ -367,12 +367,11 @@ const createSubscriptionPayment = async (req, res, next) => {
     });
 
     // Initialize PayHere payment
-    // PayHere requires HTTP/HTTPS URLs for return/cancel
+    // PayHere requires HTTPS URLs for return/cancel (sandbox accepts HTTP but production requires HTTPS)
     // For mobile apps, payment status is updated via webhook
     // App will check payment status when user returns
-    // Note: For local development, use ngrok or similar to expose your backend
-    // Set BACKEND_URL in .env to your public URL (e.g., https://your-ngrok-url.ngrok.io)
-    const backendUrl = process.env.BACKEND_URL || `http://localhost:${config.PORT}`;
+    // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
+    const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
     
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
