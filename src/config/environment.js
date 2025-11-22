@@ -20,7 +20,11 @@ const config = {
   PAYHERE_MERCHANT_SECRET: process.env.PAYHERE_MERCHANT_SECRET,
   PAYHERE_SANDBOX: process.env.PAYHERE_SANDBOX || 'true',
 
-  // Email configuration
+  // Email configuration (Resend)
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || 'Get-Fit Gym <onboarding@resend.dev>',
+  
+  // Legacy SMTP configuration (kept for backward compatibility, not used)
   EMAIL_HOST: process.env.EMAIL_HOST,
   EMAIL_PORT: process.env.EMAIL_PORT,
   EMAIL_USER: process.env.EMAIL_USER,

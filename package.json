@@ -34,6 +34,7 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.10",
+    "resend": "^6.5.2",
     "stripe": "^19.1.0",
     "winston": "^3.18.3"
   },

@@ -1,27 +1,33 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const config = require('../config/environment');
 const logger = require('../utils/logger');
 
-const transporter = nodemailer.createTransport({
-  host: config.EMAIL_HOST,
-  port: Number(config.EMAIL_PORT) || 587,
-  secure: false,
-  auth: { user: config.EMAIL_USER, pass: config.EMAIL_PASS }
-});
+// Initialize Resend client
+const resend = config.RESEND_API_KEY ? new Resend(config.RESEND_API_KEY) : null;
 
-const sendMail = async ({ to, subject, html }) => {
-  if (!config.EMAIL_USER) {
-    logger.warn('Email not configured; skipping send');
+const sendMail = async ({ to, subject, html, from }) => {
+  if (!config.RESEND_API_KEY || !resend) {
+    logger.warn('Resend API key not configured; skipping send');
     return;
   }
+
   try {
-    await transporter.sendMail({ 
-      from: `"Get-Fit Gym" <${config.EMAIL_USER}>`, 
-      to, 
-      subject, 
-      html 
+    const fromEmail = from || config.RESEND_FROM_EMAIL || `Get-Fit Gym <onboarding@resend.dev>`;
+    
+    const { data, error } = await resend.emails.send({
+      from: fromEmail,
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
     });
-    logger.info(`Email sent successfully to ${to}`);
+
+    if (error) {
+      logger.error(`Failed to send email to ${to}:`, error);
+      throw new Error(error.message || 'Failed to send email');
+    }
+
+    logger.info(`Email sent successfully to ${to}`, { id: data?.id });
+    return data;
   } catch (error) {
     logger.error(`Failed to send email to ${to}:`, error);
     throw error;
