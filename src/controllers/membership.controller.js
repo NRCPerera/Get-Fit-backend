@@ -1,3 +1,4 @@
+// controllers/membership.controller.js
 const ApiError = require('../utils/ApiError');
 const { MEMBERSHIP_PLANS } = require('../utils/constants');
 const Membership = require('../models/Membership');
@@ -10,7 +11,7 @@ const normalizePlans = () => MEMBERSHIP_PLANS.map(plan => ({
   id: plan.id,
   name: plan.name,
   price: plan.price,
-  currency: plan.currency || 'usd',
+  currency: plan.currency || 'LKR',
   durationDays: plan.durationDays,
   description: plan.description || '',
 }));
@@ -82,9 +83,9 @@ const purchaseMembership = async (req, res, next) => {
     // Generate unique order ID
     const orderId = `MEM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    // Use plan currency, default to LKR for PayHere
-    const amount = plan.price;
-    const currency = plan.currency === 'LKR' ? 'LKR' : 'LKR'; // PayHere primarily supports LKR
+    // Use plan price and default currency LKR for PayHere
+    const amount = Number(plan.price);
+    const currency = 'LKR'; // PayHere primary currency - ensure sandbox supports your currency if different
 
     // Create payment record with pending status
     const payment = await Payment.create({
@@ -106,21 +107,25 @@ const purchaseMembership = async (req, res, next) => {
     });
 
     // Initialize PayHere payment
-    // PayHere requires HTTPS URLs for return/cancel (sandbox accepts HTTP but production requires HTTPS)
-    // Payment status will be updated via webhook, app will check status
-    // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
-    const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
-    
+    const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT || 3000}`;
+
+    // Ensure we pass separate first/last names if available
+    const customerName = user.name || 'Customer';
+    const nameParts = customerName.trim().split(' ').filter(Boolean);
+    const firstName = nameParts[0] || 'Customer';
+    const lastName = nameParts.slice(1).join(' ') || 'User';
+
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
       amount: amount,
       currency: currency,
       items: `${plan.name} Membership`,
-      customerName: user.name || 'Customer',
-      customerEmail: user.email, // Required by PayHere
-      customerPhone: user.phone, // Will use default if empty
-      customerAddress: user.address || '', // Optional
-      city: user.city || '', // Optional
+      first_name: firstName,
+      last_name: lastName,
+      email: user.email, // Required by PayHere
+      phone: user.phone || '0770000000',
+      address: user.address || '',
+      city: user.city || '',
       country: 'Sri Lanka',
       returnUrl: `${backendUrl}/payment/return?paymentId=${payment._id}&type=membership`,
       cancelUrl: `${backendUrl}/payment/cancel?paymentId=${payment._id}&type=membership`,
@@ -161,4 +166,3 @@ module.exports = {
   purchaseMembership,
   getAllMemberships,
 };
-
