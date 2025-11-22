@@ -336,19 +336,34 @@ const createSubscriptionPayment = async (req, res, next) => {
 
     // Check if instructor exists
     const Instructor = require('../models/Instructor');
-    const instructor = await Instructor.findOne({ userId: instructorId });
+    const instructor = await Instructor.findOne({ userId: instructorId }).populate('userId', 'name email');
     if (!instructor) {
       return next(new ApiError('Instructor not found', 404));
     }
 
-    // Get user details
+    // Get instructor user details
+    const instructorUser = await User.findById(instructorId);
+    if (!instructorUser) {
+      return next(new ApiError('Instructor user not found', 404));
+    }
+
+    // Get user details (the customer making the payment)
     const user = await User.findById(req.user.id);
     if (!user) {
       return next(new ApiError('User not found', 404));
     }
 
-    // Generate unique order ID
+    // Ensure email is valid (PayHere requires valid email)
+    if (!user.email || !user.email.includes('@')) {
+      return next(new ApiError('Valid email address is required for payment', 400));
+    }
+
+    // Generate unique order ID (PayHere requires unique order IDs)
     const orderId = `SUB_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create description for payment
+    const instructorName = instructorUser.name || 'Instructor';
+    const paymentDescription = description || `Monthly subscription to ${instructorName}`;
 
     // Create payment record
     const payment = await Payment.create({
@@ -359,7 +374,7 @@ const createSubscriptionPayment = async (req, res, next) => {
       status: 'pending',
       paymentMethod: 'payhere',
       payhereOrderId: orderId,
-      description: description || `Monthly subscription to ${instructor.userId?.name || 'Instructor'}`,
+      description: paymentDescription,
       metadata: {
         type: 'subscription',
         instructorId: instructorId
@@ -377,7 +392,7 @@ const createSubscriptionPayment = async (req, res, next) => {
       orderId: orderId,
       amount: amount,
       currency: currency,
-      items: description || `Monthly subscription to ${instructor.userId?.name || 'Instructor'}`,
+      items: paymentDescription,
       customerName: user.name || 'Customer',
       customerEmail: user.email, // Required by PayHere
       customerPhone: user.phone, // Will use default if empty

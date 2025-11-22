@@ -121,32 +121,70 @@ class PayHereService {
       });
     }
     
+    // Parse customer name properly
+    let firstName = first_name || '';
+    let lastName = last_name || '';
+    
+    if (!firstName && !lastName && customerName) {
+      const nameParts = customerName.trim().split(' ').filter(part => part.length > 0);
+      firstName = nameParts[0] || 'Customer';
+      lastName = nameParts.slice(1).join(' ') || 'User';
+    } else {
+      firstName = firstName || 'Customer';
+      lastName = lastName || 'User';
+    }
+
+    // Validate and sanitize email (PayHere requires valid email format)
+    const customerEmailValue = email || customerEmail || 'customer@example.com';
+    if (!customerEmailValue.includes('@') || !customerEmailValue.includes('.')) {
+      throw new Error('Invalid email address format. PayHere requires a valid email.');
+    }
+
+    // Validate phone (PayHere requires phone number)
+    let phoneValue = phone || customerPhone || '0770000000';
+    // Remove any non-numeric characters except +
+    phoneValue = phoneValue.replace(/[^\d+]/g, '');
+    if (!phoneValue || phoneValue.length < 9) {
+      phoneValue = '0770000000'; // Default fallback
+    }
+
+    // Validate amount
+    const amountValue = parseFloat(amount);
+    if (isNaN(amountValue) || amountValue <= 0) {
+      throw new Error('Invalid payment amount');
+    }
+
+    // Sanitize items (remove special characters that might cause issues)
+    let itemsValue = items || 'Subscription Payment';
+    // Ensure items doesn't have problematic characters for URL encoding
+    itemsValue = itemsValue.substring(0, 200); // Limit length
+
     const params = {
-      merchant_id: this.merchantId,
+      merchant_id: String(this.merchantId),
       return_url: finalReturnUrl,
       cancel_url: finalCancelUrl,
       notify_url: finalNotifyUrl,
-      first_name: first_name || customerName?.split(' ')[0] || 'Customer',
-      last_name: last_name || customerName?.split(' ').slice(1).join(' ') || 'User',
-      email: email || customerEmail || 'customer@example.com', // Required by PayHere
-      phone: phone || customerPhone || '0770000000', // Required by PayHere - use default if missing
+      first_name: firstName,
+      last_name: lastName,
+      email: customerEmailValue,
+      phone: phoneValue,
       country: countryParam || country || 'Sri Lanka',
-      order_id: orderId,
-      items: items || 'Subscription Payment',
-      currency: currency,
-      amount: parseFloat(amount).toFixed(2),
+      order_id: String(orderId),
+      items: itemsValue,
+      currency: String(currency).toUpperCase(),
+      amount: amountValue.toFixed(2),
     };
 
-    // Only include optional parameters if they have values
+    // Only include optional parameters if they have non-empty values
     // PayHere may reject requests with empty strings in optional fields
-    const addressValue = address || customerAddress;
-    if (addressValue && addressValue.trim() !== '') {
-      params.address = addressValue;
+    const addressValue = (address || customerAddress || '').trim();
+    if (addressValue && addressValue.length > 0) {
+      params.address = addressValue.substring(0, 100); // Limit length
     }
 
-    const cityValue = cityParam || city;
-    if (cityValue && cityValue.trim() !== '') {
-      params.city = cityValue;
+    const cityValue = (cityParam || city || '').trim();
+    if (cityValue && cityValue.length > 0) {
+      params.city = cityValue.substring(0, 50); // Limit length
     }
 
     // Generate hash - PayHere requires hash to be calculated BEFORE adding it to params
@@ -172,20 +210,46 @@ class PayHereService {
     // Add hash to params
     params.hash = hashValue;
     
-    // Log for debugging (remove in production)
+    // Validate required parameters before sending
+    const requiredParams = ['merchant_id', 'return_url', 'cancel_url', 'notify_url', 'first_name', 'last_name', 'email', 'phone', 'country', 'order_id', 'items', 'currency', 'amount'];
+    const missingParams = requiredParams.filter(param => !params[param] || params[param] === '');
+    if (missingParams.length > 0) {
+      throw new Error(`Missing required PayHere parameters: ${missingParams.join(', ')}`);
+    }
+
+    // Log for debugging
+    console.log('PayHere Payment Configuration:', {
+      merchantId: this.merchantId ? `${this.merchantId.substring(0, 4)}...` : 'NOT SET',
+      isSandbox: this.isSandbox,
+      baseUrl: this.baseUrl,
+      hasSecret: !!this.merchantSecret,
+      secretLength: this.merchantSecret ? this.merchantSecret.length : 0
+    });
+    
     if (this.isSandbox) {
-      console.log('PayHere Payment Configuration:', {
-        merchantId: this.merchantId,
-        isSandbox: this.isSandbox,
-        baseUrl: this.baseUrl,
-        hasSecret: !!this.merchantSecret
+      console.log('PayHere Payment Parameters (sanitized):', {
+        merchant_id: params.merchant_id,
+        return_url: params.return_url,
+        cancel_url: params.cancel_url,
+        notify_url: params.notify_url,
+        first_name: params.first_name,
+        last_name: params.last_name,
+        email: params.email,
+        phone: params.phone,
+        country: params.country,
+        order_id: params.order_id,
+        items: params.items,
+        currency: params.currency,
+        amount: params.amount,
+        hash: params.hash ? `${params.hash.substring(0, 8)}...` : 'NOT CALCULATED',
+        address: params.address || 'not provided',
+        city: params.city || 'not provided'
       });
-      console.log('PayHere Payment Parameters:', JSON.stringify(params, null, 2));
+      
       console.log('PayHere Hash Calculation:', {
-        hashString: hashString,
         hashStringLength: hashString.length,
         hashValue: hashValue,
-        merchantSecretLength: this.merchantSecret ? this.merchantSecret.length : 0
+        hashValueLength: hashValue.length
       });
     }
 
