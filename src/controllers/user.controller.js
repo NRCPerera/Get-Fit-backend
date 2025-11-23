@@ -28,8 +28,23 @@ const updateProfile = async (req, res, next) => {
 
 const uploadProfilePicture = async (req, res, next) => {
   try {
+    // Log request details for debugging
+    logger.info('Profile picture upload request', {
+      hasFile: !!req.file,
+      fieldName: req.file?.fieldname,
+      fileName: req.file?.originalname,
+      fileSize: req.file?.size,
+      mimeType: req.file?.mimetype,
+      hasBuffer: !!req.file?.buffer,
+      bufferSize: req.file?.buffer?.length
+    });
+
     if (!req.file) {
-      return next(new ApiError('No file uploaded', 400));
+      logger.warn('Profile picture upload failed: No file in request', {
+        body: Object.keys(req.body || {}),
+        files: Object.keys(req.files || {})
+      });
+      return next(new ApiError('No file uploaded. Please ensure you are sending the file with field name "image".', 400));
     }
 
     // Get current user
