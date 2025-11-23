@@ -110,7 +110,15 @@ class PayHereService {
       throw new Error('Invalid payment amount');
     }
 
-    // Build base params
+    // Build base params - All parameters are REQUIRED by PayHere
+    // Sanitize and set default values for required fields
+    addressValue = (addressValue || '').trim();
+    const cityValue = (city || '').trim();
+
+    // PayHere requires address and city - use defaults if not provided
+    const finalAddress = addressValue || 'No Address Provided';
+    const finalCity = cityValue || 'Colombo';
+
     const params = {
       merchant_id: String(this.merchantId),
       return_url: finalReturnUrl,
@@ -120,6 +128,8 @@ class PayHereService {
       last_name: String(lastName),
       email: customerEmailValue,
       phone: phoneValue,
+      address: String(finalAddress).substring(0, 100), // REQUIRED - limit to 100 chars
+      city: String(finalCity).substring(0, 50), // REQUIRED - limit to 50 chars
       country: String(country || 'Sri Lanka'),
       order_id: String(orderId),
       items: String(items || 'Subscription Payment').substring(0, 200),
@@ -127,22 +137,54 @@ class PayHereService {
       amount: amountValue.toFixed(2),
     };
 
-    addressValue = (addressValue || '').trim();
-    if (addressValue) params.address = addressValue.substring(0, 100);
-
-    const cityValue = (city || '').trim();
-    if (cityValue) params.city = cityValue.substring(0, 50);
-
     // PayHere requires a specific hash algorithm:
-    // hash = strtoupper( md5( merchant_id + order_id + amount (2 decimals) + currency + strtoupper(md5(merchant_secret)) ) )
-    const merchantSecretMd5 = crypto.createHash('md5').update(String(this.merchantSecret)).digest('hex').toUpperCase();
-    const hashInput = String(params.merchant_id) + String(params.order_id) + params.amount + String(params.currency) + merchantSecretMd5;
-    const hashValue = crypto.createHash('md5').update(hashInput).digest('hex').toUpperCase();
+    // hash = md5(merchantId + orderId + amountFormatted + currency + hashedSecret).toString().toUpperCase()
+    // where hashedSecret = md5(merchant_secret).toString().toUpperCase()
+    
+    // Step 1: Hash the merchant secret (hashedSecret)
+    const hashedSecret = crypto.createHash('md5')
+      .update(String(this.merchantSecret))
+      .digest('hex')
+      .toUpperCase();
+    
+    // Step 2: Format amount to 2 decimal places
+    const amountFormatted = amountValue.toFixed(2);
+    
+    // Step 3: Concatenate: merchantId + orderId + amountFormatted + currency + hashedSecret
+    const hashInput = String(params.merchant_id) + 
+                      String(params.order_id) + 
+                      amountFormatted + 
+                      String(params.currency).toUpperCase() + 
+                      hashedSecret;
+    
+    // Step 4: Hash the concatenated string and convert to uppercase
+    const hash = crypto.createHash('md5')
+      .update(hashInput)
+      .digest('hex')
+      .toUpperCase();
 
-    params.hash = hashValue;
+    params.hash = hash;
 
-    // Ensure required params exist
-    const requiredParams = ['merchant_id', 'return_url', 'cancel_url', 'notify_url', 'first_name', 'last_name', 'email', 'phone', 'country', 'order_id', 'items', 'currency', 'amount', 'hash'];
+    // Ensure ALL required params exist (as per PayHere documentation)
+    const requiredParams = [
+      'merchant_id',
+      'return_url',
+      'cancel_url',
+      'notify_url',
+      'first_name',
+      'last_name',
+      'email',
+      'phone',
+      'address', // REQUIRED by PayHere
+      'city', // REQUIRED by PayHere
+      'country',
+      'order_id',
+      'items',
+      'currency',
+      'amount',
+      'hash' // REQUIRED from 2023-01-16
+    ];
+    
     const missingParams = requiredParams.filter(p => !params[p] || params[p] === '');
     if (missingParams.length > 0) {
       throw new Error(`Missing required PayHere parameters: ${missingParams.join(', ')}`);
@@ -152,13 +194,23 @@ class PayHereService {
     const paymentUrl = `${this.baseUrl}/pay/checkout`;
 
     if (this.isSandbox) {
-      console.log('Prepared PayHere params (sample):', {
+      console.log('Prepared PayHere params (all required params included):', {
         merchant_id: params.merchant_id,
-        order_id: params.order_id,
-        amount: params.amount,
-        currency: params.currency,
-        hash: `${params.hash.substring(0, 8)}...`,
+        return_url: params.return_url,
+        cancel_url: params.cancel_url,
         notify_url: params.notify_url,
+        first_name: params.first_name,
+        last_name: params.last_name,
+        email: params.email.substring(0, 10) + '...',
+        phone: params.phone,
+        address: params.address.substring(0, 30) + '...',
+        city: params.city,
+        country: params.country,
+        order_id: params.order_id,
+        items: params.items.substring(0, 30) + '...',
+        currency: params.currency,
+        amount: params.amount,
+        hash: `${params.hash.substring(0, 8)}...`,
       });
     }
 
