@@ -217,7 +217,7 @@ class PayHereService {
     return {
       paymentUrl,
       params,
-      hash: hashValue
+      hash: hash
     };
   }
 
