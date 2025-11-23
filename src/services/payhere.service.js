@@ -39,17 +39,42 @@ class PayHereService {
       amount,
       currency = 'LKR',
       items = '',
+      // Accept both old format (first_name, last_name) and new format (customerName)
       first_name,
       last_name,
+      customerName,
+      // Accept both 'email' and 'customerEmail'
       email,
+      customerEmail,
+      // Accept both 'phone' and 'customerPhone'
       phone,
+      customerPhone,
+      // Accept both 'address' and 'customerAddress'
       address,
+      customerAddress,
       city,
       country = 'Sri Lanka',
       returnUrl,
       cancelUrl,
       notifyUrl,
     } = paymentData;
+
+    // Normalize parameters - support both naming conventions
+    let firstName = first_name;
+    let lastName = last_name;
+    let emailValue = email || customerEmail;
+    let phoneValue = phone || customerPhone;
+    let addressValue = address || customerAddress;
+
+    // If customerName is provided but first_name/last_name are not, split it
+    if (customerName && !first_name && !last_name) {
+      const nameParts = String(customerName).trim().split(/\s+/);
+      firstName = nameParts[0] || 'Customer';
+      lastName = nameParts.slice(1).join(' ') || 'User';
+    } else {
+      firstName = firstName || 'Customer';
+      lastName = lastName || 'User';
+    }
 
     // determine base urls
     const defaultBaseUrl = config.BACKEND_URL || config.CLIENT_URL || `http://localhost:${config.PORT || 3000}`;
@@ -66,13 +91,15 @@ class PayHereService {
     const finalNotifyUrl = notifyUrl || `${baseUrl}/api/v1/payments/payhere-notify`;
 
     // Validate and sanitize email
-    const customerEmailValue = (email || '').trim();
+    const customerEmailValue = (emailValue || '').trim();
     if (!customerEmailValue || !customerEmailValue.includes('@') || !customerEmailValue.includes('.')) {
-      throw new Error('Invalid email address format. PayHere requires a valid email.');
+      // Log the actual value for debugging (without exposing sensitive data)
+      const emailPreview = customerEmailValue ? `${customerEmailValue.substring(0, 10)}...` : 'EMPTY';
+      throw new Error(`Invalid email address format. PayHere requires a valid email. Received: ${emailPreview}`);
     }
 
     // Validate phone (simple sanitization)
-    let phoneValue = (phone || '').replace(/[^\d+]/g, '');
+    phoneValue = (phoneValue || '').replace(/[^\d+]/g, '');
     if (!phoneValue || phoneValue.length < 9) {
       phoneValue = '0770000000';
     }
@@ -89,8 +116,8 @@ class PayHereService {
       return_url: finalReturnUrl,
       cancel_url: finalCancelUrl,
       notify_url: finalNotifyUrl,
-      first_name: String(first_name || 'Customer'),
-      last_name: String(last_name || 'User'),
+      first_name: String(firstName),
+      last_name: String(lastName),
       email: customerEmailValue,
       phone: phoneValue,
       country: String(country || 'Sri Lanka'),
@@ -100,7 +127,7 @@ class PayHereService {
       amount: amountValue.toFixed(2),
     };
 
-    const addressValue = (address || '').trim();
+    addressValue = (addressValue || '').trim();
     if (addressValue) params.address = addressValue.substring(0, 100);
 
     const cityValue = (city || '').trim();

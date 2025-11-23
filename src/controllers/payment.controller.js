@@ -67,6 +67,26 @@ const createPaymentIntent = async (req, res, next) => {
       return next(new ApiError('User not found', 404));
     }
 
+    // Ensure email is valid (PayHere requires valid email)
+    if (!user.email || typeof user.email !== 'string' || !user.email.trim() || !user.email.includes('@')) {
+      logger.error('Invalid user email for payment:', {
+        userId: user._id,
+        email: user.email,
+        emailType: typeof user.email
+      });
+      return next(new ApiError('Valid email address is required for payment. Please update your profile with a valid email address.', 400));
+    }
+
+    // Sanitize and validate email format
+    const userEmail = user.email.trim();
+    if (!userEmail.includes('.') || userEmail.length < 5) {
+      logger.error('Email format validation failed:', {
+        userId: user._id,
+        email: userEmail
+      });
+      return next(new ApiError('Invalid email address format. Please ensure your email address is valid.', 400));
+    }
+
     // Generate unique order ID
     const orderId = `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -90,14 +110,24 @@ const createPaymentIntent = async (req, res, next) => {
     // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
     const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
     
+    // Log payment initialization details (without sensitive data)
+    logger.info('Initializing PayHere payment (createPaymentIntent):', {
+      orderId,
+      amount,
+      currency,
+      userId: user._id,
+      email: userEmail.substring(0, 5) + '...', // Log partial email for debugging
+      hasPhone: !!user.phone
+    });
+
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
       amount: amount,
       currency: currency,
       items: description || 'Payment',
       customerName: user.name || 'Customer',
-      customerEmail: user.email, // Required by PayHere
-      customerPhone: user.phone, // Will use default if empty
+      customerEmail: userEmail, // Required by PayHere - use sanitized email
+      customerPhone: user.phone || '', // Will use default if empty
       customerAddress: user.address || '', // Optional
       city: user.city || '', // Optional
       country: 'Sri Lanka',
@@ -354,8 +384,23 @@ const createSubscriptionPayment = async (req, res, next) => {
     }
 
     // Ensure email is valid (PayHere requires valid email)
-    if (!user.email || !user.email.includes('@')) {
-      return next(new ApiError('Valid email address is required for payment', 400));
+    if (!user.email || typeof user.email !== 'string' || !user.email.trim() || !user.email.includes('@')) {
+      logger.error('Invalid user email for payment:', {
+        userId: user._id,
+        email: user.email,
+        emailType: typeof user.email
+      });
+      return next(new ApiError('Valid email address is required for payment. Please update your profile with a valid email address.', 400));
+    }
+
+    // Sanitize and validate email format
+    const userEmail = user.email.trim();
+    if (!userEmail.includes('.') || userEmail.length < 5) {
+      logger.error('Email format validation failed:', {
+        userId: user._id,
+        email: userEmail
+      });
+      return next(new ApiError('Invalid email address format. Please ensure your email address is valid.', 400));
     }
 
     // Generate unique order ID (PayHere requires unique order IDs)
@@ -388,14 +433,24 @@ const createSubscriptionPayment = async (req, res, next) => {
     // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
     const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
     
+    // Log payment initialization details (without sensitive data)
+    logger.info('Initializing PayHere payment:', {
+      orderId,
+      amount,
+      currency,
+      userId: user._id,
+      email: userEmail.substring(0, 5) + '...', // Log partial email for debugging
+      hasPhone: !!user.phone
+    });
+
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
       amount: amount,
       currency: currency,
       items: paymentDescription,
       customerName: user.name || 'Customer',
-      customerEmail: user.email, // Required by PayHere
-      customerPhone: user.phone, // Will use default if empty
+      customerEmail: userEmail, // Required by PayHere - use sanitized email
+      customerPhone: user.phone || '', // Will use default if empty
       customerAddress: user.address || '', // Optional
       city: user.city || '', // Optional
       country: 'Sri Lanka',
