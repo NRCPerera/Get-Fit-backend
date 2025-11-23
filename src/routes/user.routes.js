@@ -8,7 +8,7 @@ const { uploadImage } = require('../middlewares/upload.middleware');
 
 router.get('/me', verifyToken, getProfile);
 router.put('/me', verifyToken, validateRequest(updateProfileValidator), updateProfile);
-router.post('/me/profile-picture', verifyToken, uploadImage.single('image'), uploadProfilePicture);
+router.post('/me/profile-picture', verifyToken, uploadImage.single('profilePicture'), uploadProfilePicture);
 router.post('/me/change-password', verifyToken, validateRequest(changePasswordValidator), changePassword);
 router.delete('/me', verifyToken, deleteAccount);
 

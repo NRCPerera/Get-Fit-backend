@@ -91,9 +91,18 @@ if (config.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Serve static files from uploads directory
-const path = require('path');
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Note: Static file serving removed - files are now served from Cloudinary CDN
+// Handle old /uploads/* requests (legacy support - return 404 or redirect)
+// This middleware catches all routes starting with /uploads
+app.use('/uploads', (req, res, next) => {
+  // Log for debugging purposes
+  logger.warn(`Legacy file request blocked: ${req.path} - Files are now stored in Cloudinary`);
+  res.status(404).json({
+    success: false,
+    error: 'File not found. Files are now stored in Cloudinary. Please re-upload your profile picture or exercise video.',
+    path: req.path
+  });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

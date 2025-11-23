@@ -23,6 +23,11 @@ const config = {
   // Email configuration (Resend)
   RESEND_API_KEY: process.env.RESEND_API_KEY,
   RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || 'Get-Fit Gym <onboarding@resend.dev>',
+
+  // Cloudinary configuration
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET,
   
   // Legacy SMTP configuration (kept for backward compatibility, not used)
   EMAIL_HOST: process.env.EMAIL_HOST,

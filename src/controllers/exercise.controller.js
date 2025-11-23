@@ -1,9 +1,7 @@
 const ApiError = require('../utils/ApiError');
 const Exercise = require('../models/Exercise');
-const path = require('path');
-const { deleteFile } = require('../services/upload.service');
-
-const uploadsDir = path.join(__dirname, '../../uploads');
+const logger = require('../utils/logger');
+const { uploadVideo, deleteFromCloudinary } = require('../services/cloudinary.service');
 
 const getAllExercises = async (req, res, next) => {
   try {
@@ -36,10 +34,21 @@ const getAllExercises = async (req, res, next) => {
       Exercise.countDocuments(filter)
     ]);
 
+    // Transform items to normalize URLs (handle old local paths)
+    const transformedItems = items.map(exercise => {
+      const exerciseObj = exercise.toObject();
+      const safeUrls = exercise.getSafeUrls();
+      exerciseObj.videoUrl = safeUrls.videoUrl;
+      exerciseObj.imageUrl = safeUrls.imageUrl;
+      if (safeUrls.videoUrlData) exerciseObj.videoUrlData = safeUrls.videoUrlData;
+      if (safeUrls.imageUrlData) exerciseObj.imageUrlData = safeUrls.imageUrlData;
+      return exerciseObj;
+    });
+
     res.json({
       success: true,
       data: {
-        items,
+        items: transformedItems,
         total,
         page: numericPage,
         pages: Math.ceil(total / numericLimit)
@@ -54,7 +63,16 @@ const getExerciseById = async (req, res, next) => {
   try {
     const exercise = await Exercise.findById(req.params.id);
     if (!exercise || !exercise.isActive) return next(new ApiError('Exercise not found', 404));
-    res.json({ success: true, data: { exercise } });
+    
+    // Transform exercise to normalize URLs (handle old local paths)
+    const exerciseObj = exercise.toObject();
+    const safeUrls = exercise.getSafeUrls();
+    exerciseObj.videoUrl = safeUrls.videoUrl;
+    exerciseObj.imageUrl = safeUrls.imageUrl;
+    if (safeUrls.videoUrlData) exerciseObj.videoUrlData = safeUrls.videoUrlData;
+    if (safeUrls.imageUrlData) exerciseObj.imageUrlData = safeUrls.imageUrlData;
+    
+    res.json({ success: true, data: { exercise: exerciseObj } });
   } catch (err) { next(err); }
 };
 
@@ -88,66 +106,209 @@ const createExercise = async (req, res, next) => {
   console.log('User ID:', req.user?.id);
   console.log('==============================');
   
-  const payload = { ...req.body, createdBy: req.user?.id };
+  // Don't spread req.body directly - selectively add fields to avoid saving local paths
+  const payload = {
+    createdBy: req.user?.id
+  };
   
+  // Only copy safe fields that don't include file URLs
+  if (req.body.name !== undefined) payload.name = req.body.name;
+  if (req.body.description !== undefined) payload.description = req.body.description;
+  if (req.body.category !== undefined) payload.category = req.body.category;
+  if (req.body.difficulty !== undefined) payload.difficulty = req.body.difficulty;
   
+  // Parse array fields
   payload.muscleGroups = parseArrayField(req.body.muscleGroups) || [];
   payload.equipment = parseArrayField(req.body.equipment) || [];
   payload.instructions = parseArrayField(req.body.instructions) || [];
-  payload.duration = toInt(req.body.duration);
-  payload.caloriesBurned = toInt(req.body.caloriesBurned);
   
+  // Parse integer fields
+  const dur = toInt(req.body.duration);
+  const cal = toInt(req.body.caloriesBurned);
+  if (dur !== undefined) payload.duration = dur;
+  if (cal !== undefined) payload.caloriesBurned = cal;
   
-  // multer.fields puts files under req.files[fieldname]
-  // Only handle video (image support removed)
+  // IMPORTANT: Don't include videoUrl or imageUrl from req.body - only set from Cloudinary uploads
+  // This prevents saving local paths or invalid URLs
+  
+  // Handle video upload to Cloudinary
   if (req.files && req.files.videoUrl && req.files.videoUrl[0]) {
-    const relativePath = path.relative(uploadsDir, req.files.videoUrl[0].path).replace(/\\/g, '/');
-    payload.videoUrl = relativePath;
+    const videoFile = req.files.videoUrl[0];
+    
+    // Validate file buffer exists (required for Cloudinary)
+    if (!videoFile.buffer) {
+      return next(new ApiError('Video buffer is missing. Ensure file was uploaded correctly.', 400));
+    }
+
+    logger.info('Uploading video to Cloudinary', {
+      fileName: videoFile.originalname,
+      mimeType: videoFile.mimetype,
+      size: videoFile.size,
+      bufferSize: videoFile.buffer?.length
+    });
+
+    try {
+      const uploadResult = await uploadVideo(videoFile, 'gym-management/exercises');
+      
+      // Validate upload result
+      if (!uploadResult || !uploadResult.secure_url || !uploadResult.public_id) {
+        logger.error('Invalid Cloudinary upload result:', uploadResult);
+        return next(new ApiError('Cloudinary upload succeeded but returned invalid data', 500));
+      }
+
+      logger.info('Video uploaded successfully to Cloudinary', {
+        public_id: uploadResult.public_id,
+        secure_url: uploadResult.secure_url?.substring(0, 50) + '...'
+      });
+
+      payload.videoUrl = {
+        secure_url: uploadResult.secure_url,
+        public_id: uploadResult.public_id
+      };
+    } catch (uploadError) {
+      logger.error('Video upload error:', {
+        error: uploadError.message,
+        stack: uploadError.stack,
+        fileName: videoFile.originalname
+      });
+      return next(new ApiError(`Failed to upload video to Cloudinary: ${uploadError.message}`, 500));
+    }
   }
   
   
   const exercise = await Exercise.create(payload);
-  res.status(201).json({ success: true, message: 'Exercise created', data: { exercise } });
+  
+  // Transform exercise to normalize URLs
+  const exerciseObj = exercise.toObject();
+  const safeUrls = exercise.getSafeUrls();
+  exerciseObj.videoUrl = safeUrls.videoUrl;
+  exerciseObj.imageUrl = safeUrls.imageUrl;
+  if (safeUrls.videoUrlData) exerciseObj.videoUrlData = safeUrls.videoUrlData;
+  if (safeUrls.imageUrlData) exerciseObj.imageUrlData = safeUrls.imageUrlData;
+  
+  res.status(201).json({ success: true, message: 'Exercise created', data: { exercise: exerciseObj } });
   } catch (err) { next(err); }
   };
   
   
   const updateExercise = async (req, res, next) => {
   try {
-  const payload = { ...req.body };
+  // Don't spread req.body directly - we'll selectively add fields to avoid saving local paths
+  const payload = {};
+  
+  // Only copy safe fields that don't include file URLs
+  if (req.body.name !== undefined) payload.name = req.body.name;
+  if (req.body.description !== undefined) payload.description = req.body.description;
+  if (req.body.category !== undefined) payload.category = req.body.category;
+  if (req.body.difficulty !== undefined) payload.difficulty = req.body.difficulty;
+  
+  // Parse array fields
   const mg = parseArrayField(req.body.muscleGroups);
   const eq = parseArrayField(req.body.equipment);
   const ins = parseArrayField(req.body.instructions);
-  if (mg) payload.muscleGroups = mg; if (eq) payload.equipment = eq; if (ins) payload.instructions = ins;
-  const dur = toInt(req.body.duration); const cal = toInt(req.body.caloriesBurned);
-  if (dur !== undefined) payload.duration = dur; if (cal !== undefined) payload.caloriesBurned = cal;
+  if (mg) payload.muscleGroups = mg; 
+  if (eq) payload.equipment = eq; 
+  if (ins) payload.instructions = ins;
   
+  // Parse integer fields
+  const dur = toInt(req.body.duration); 
+  const cal = toInt(req.body.caloriesBurned);
+  if (dur !== undefined) payload.duration = dur; 
+  if (cal !== undefined) payload.caloriesBurned = cal;
+  
+  // IMPORTANT: Don't include videoUrl or imageUrl from req.body - only set from Cloudinary uploads
+  // This prevents saving local paths or invalid URLs
   
   const existingExercise = await Exercise.findById(req.params.id);
   if (!existingExercise) return next(new ApiError('Exercise not found', 404));
   
   
-  // Only handle video (image support removed)
+  // Handle video upload to Cloudinary
   if (req.files && req.files.videoUrl && req.files.videoUrl[0]) {
-    // Delete old video if it exists
-    if (existingExercise.videoUrl) {
-      await deleteFile(existingExercise.videoUrl);
+    try {
+      // Delete old video from Cloudinary if exists
+      if (existingExercise.videoUrl?.public_id) {
+        try {
+          await deleteFromCloudinary(existingExercise.videoUrl.public_id, { resource_type: 'video' });
+        } catch (deleteError) {
+          // Log error but don't fail the upload
+          logger.warn('Failed to delete old video:', deleteError);
+        }
+      }
+
+      // Validate file buffer exists
+      const videoFile = req.files.videoUrl[0];
+      if (!videoFile.buffer) {
+        return next(new ApiError('Video buffer is missing. Ensure file was uploaded correctly.', 400));
+      }
+
+      logger.info('Uploading new video to Cloudinary', {
+        fileName: videoFile.originalname,
+        mimeType: videoFile.mimetype,
+        size: videoFile.size
+      });
+
+      // Upload new video to Cloudinary
+      const uploadResult = await uploadVideo(videoFile, 'gym-management/exercises');
+      
+      // Validate upload result
+      if (!uploadResult || !uploadResult.secure_url || !uploadResult.public_id) {
+        logger.error('Invalid Cloudinary upload result:', uploadResult);
+        return next(new ApiError('Cloudinary upload succeeded but returned invalid data', 500));
+      }
+
+      logger.info('Video uploaded successfully to Cloudinary', {
+        public_id: uploadResult.public_id
+      });
+
+      payload.videoUrl = {
+        secure_url: uploadResult.secure_url,
+        public_id: uploadResult.public_id
+      };
+    } catch (uploadError) {
+      logger.error('Video upload error:', {
+        error: uploadError.message,
+        stack: uploadError.stack
+      });
+      return next(new ApiError(`Failed to upload video to Cloudinary: ${uploadError.message}`, 500));
     }
-    const relativePath = path.relative(uploadsDir, req.files.videoUrl[0].path).replace(/\\/g, '/');
-    payload.videoUrl = relativePath;
   }
+
+  // Allow removing video by sending empty string, null, or explicit 'remove' flag
+  // Check if client explicitly wants to remove video (not updating with file)
+  const shouldRemoveVideo = req.body.removeVideo === true || 
+                            req.body.removeVideo === 'true' ||
+                            (req.body.videoUrl === '' && !req.files?.videoUrl);
   
-  // Allow removing video by sending empty string or null
-  if (req.body.videoUrl === '' || req.body.videoUrl === null) {
-    if (existingExercise.videoUrl) {
-      await deleteFile(existingExercise.videoUrl);
+  if (shouldRemoveVideo) {
+    if (existingExercise.videoUrl?.public_id) {
+      try {
+        await deleteFromCloudinary(existingExercise.videoUrl.public_id, { resource_type: 'video' });
+        logger.info('Video removed from Cloudinary', {
+          public_id: existingExercise.videoUrl.public_id
+        });
+      } catch (deleteError) {
+        logger.warn('Failed to delete video:', deleteError);
+      }
     }
     payload.videoUrl = null;
+  } else if (!req.files?.videoUrl) {
+    // If no file uploaded and not removing, keep existing videoUrl (don't modify it)
+    // Don't set payload.videoUrl at all - let it remain unchanged
   }
   
   
   const exercise = await Exercise.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });
-  res.json({ success: true, message: 'Exercise updated', data: { exercise } });
+  
+  // Transform exercise to normalize URLs
+  const exerciseObj = exercise.toObject();
+  const safeUrls = exercise.getSafeUrls();
+  exerciseObj.videoUrl = safeUrls.videoUrl;
+  exerciseObj.imageUrl = safeUrls.imageUrl;
+  if (safeUrls.videoUrlData) exerciseObj.videoUrlData = safeUrls.videoUrlData;
+  if (safeUrls.imageUrlData) exerciseObj.imageUrlData = safeUrls.imageUrlData;
+  
+  res.json({ success: true, message: 'Exercise updated', data: { exercise: exerciseObj } });
   } catch (err) { next(err); }
   };
 

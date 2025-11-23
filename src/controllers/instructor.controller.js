@@ -85,7 +85,21 @@ const getAllInstructors = async (req, res, next) => {
         return {
           _id: instructor._id?.toString() || instructor._id,
           name: userData.name || 'Instructor',
-          avatarUrl: userData.profilePicture || null,
+          avatarUrl: (() => {
+            // Handle Cloudinary object format
+            if (userData.profilePicture && typeof userData.profilePicture === 'object' && userData.profilePicture.secure_url) {
+              return userData.profilePicture.secure_url;
+            }
+            // Handle old local paths - return null (file no longer exists)
+            if (typeof userData.profilePicture === 'string' && userData.profilePicture.startsWith('/uploads/')) {
+              return null;
+            }
+            // Handle Cloudinary URL string or other valid URLs
+            if (typeof userData.profilePicture === 'string' && (userData.profilePicture.startsWith('http://') || userData.profilePicture.startsWith('https://'))) {
+              return userData.profilePicture;
+            }
+            return userData.profilePicture || null;
+          })(),
           specialty: instructor.specializations?.[0] || 'Fitness',
           specializations: instructor.specializations || [],
           rating: instructor.stats?.avgRating || 0,
@@ -209,7 +223,21 @@ const getInstructorById = async (req, res, next) => {
       _id: instructor._id?.toString() || instructor._id,
       name: user.name || 'Instructor',
       email: user.email || null,
-      avatarUrl: user.profilePicture || null,
+      avatarUrl: (() => {
+        // Handle Cloudinary object format
+        if (user.profilePicture && typeof user.profilePicture === 'object' && user.profilePicture.secure_url) {
+          return user.profilePicture.secure_url;
+        }
+        // Handle old local paths - return null (file no longer exists)
+        if (typeof user.profilePicture === 'string' && user.profilePicture.startsWith('/uploads/')) {
+          return null;
+        }
+        // Handle Cloudinary URL string or other valid URLs
+        if (typeof user.profilePicture === 'string' && (user.profilePicture.startsWith('http://') || user.profilePicture.startsWith('https://'))) {
+          return user.profilePicture;
+        }
+        return user.profilePicture || null;
+      })(),
       specialty: instructor.specializations?.[0] || 'Fitness',
       specializations: instructor.specializations || [],
       rating: instructor.stats?.avgRating || 0,
@@ -278,7 +306,21 @@ const getMyProfile = async (req, res, next) => {
       name: user.name || 'Instructor',
       email: user.email || null,
       phone: user.phone || null,
-      profilePicture: user.profilePicture || null,
+      profilePicture: (() => {
+        // Handle Cloudinary object format
+        if (user.profilePicture && typeof user.profilePicture === 'object' && user.profilePicture.secure_url) {
+          return user.profilePicture.secure_url;
+        }
+        // Handle old local paths - return null (file no longer exists)
+        if (typeof user.profilePicture === 'string' && user.profilePicture.startsWith('/uploads/')) {
+          return null;
+        }
+        // Handle Cloudinary URL string or other valid URLs
+        if (typeof user.profilePicture === 'string' && (user.profilePicture.startsWith('http://') || user.profilePicture.startsWith('https://'))) {
+          return user.profilePicture;
+        }
+        return user.profilePicture || null;
+      })(),
       specializations: instructor.specializations || [],
       specialty: instructor.specializations?.[0] || 'Fitness',
       experience: instructor.experience || 0,

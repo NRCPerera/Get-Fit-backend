@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema({
     default: 'member'
   },
   profilePicture: {
-    type: String,
+    type: mongoose.Schema.Types.Mixed, // Mixed type to support both old string format and new Cloudinary object format
     default: null
   },
   phone: {
@@ -204,12 +204,38 @@ userSchema.methods.generatePasswordResetOTP = function() {
  * Get user profile (without sensitive data)
  */
 userSchema.methods.getProfile = function() {
+  // Return secure_url if profilePicture is an object, null for old local paths
+  let profilePicture = null;
+  if (this.profilePicture) {
+    if (typeof this.profilePicture === 'object' && this.profilePicture.secure_url) {
+      // New Cloudinary format - use the secure URL
+      profilePicture = this.profilePicture.secure_url;
+    } else if (typeof this.profilePicture === 'string') {
+      // Old format - check if it's a local path or Cloudinary URL
+      if (this.profilePicture.startsWith('http://') || this.profilePicture.startsWith('https://')) {
+        // It's already a full URL (could be old Cloudinary URL)
+        profilePicture = this.profilePicture;
+      } else if (this.profilePicture.startsWith('/uploads/')) {
+        // Old local path - return null (file no longer exists)
+        profilePicture = null;
+      } else {
+        // Some other format - return as-is but log a warning
+        profilePicture = this.profilePicture;
+      }
+    }
+  }
+
   return {
     id: this._id,
     name: this.name,
     email: this.email,
     role: this.role,
-    profilePicture: this.profilePicture,
+    profilePicture: profilePicture,
+    // Include full Cloudinary data if needed
+    profilePictureData: this.profilePicture?.public_id ? {
+      secure_url: this.profilePicture.secure_url,
+      public_id: this.profilePicture.public_id
+    } : null,
     phone: this.phone,
     dateOfBirth: this.dateOfBirth,
     isEmailVerified: this.isEmailVerified,
