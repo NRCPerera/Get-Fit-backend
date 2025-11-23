@@ -25,7 +25,7 @@ router.post('/subscription/saved-card', verifyToken, createSubscriptionPaymentWi
 router.post('/subscription/complete', verifyToken, completeSubscriptionPayment);
 router.get('/history', verifyToken, getPaymentHistory);
 router.get('/earnings', verifyToken, requireInstructor, getInstructorEarnings);
-router.post('/payhere-notify', handlePayHereWebhook); // PayHere webhook notification
+router.post('/payhere-notify', handlePayHereWebhook);
 router.post('/:paymentId/refund', verifyToken, requireAdmin, refundPayment);
 
 // Saved card routes

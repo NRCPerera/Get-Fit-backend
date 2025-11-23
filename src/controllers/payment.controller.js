@@ -231,7 +231,7 @@ const handlePayHereWebhook = async (req, res, next) => {
       payment.transactionDate = new Date();
       await payment.save();
 
-      // If this is a membership payment, create/activate membership
+      // If this is a membership payment, create/activate membership (same pattern as subscriptions)
       if (payment.metadata && payment.metadata.type === 'membership') {
         try {
           const Membership = require('../models/Membership');
@@ -241,25 +241,64 @@ const handlePayHereWebhook = async (req, res, next) => {
           const existingMembership = await Membership.findOne({ paymentId: payment._id });
           
           if (!existingMembership) {
+            // Check if user has an active membership - if so, extend it from the end date
+            // Otherwise, use the start date from metadata (or current date)
+            const activeMembership = await Membership.findOne({
+              userId: payment.userId,
+              status: 'active',
+              endDate: { $gt: new Date() }
+            }).sort({ endDate: -1 });
+
+            let membershipStartDate = startDate ? new Date(startDate) : new Date();
+            let membershipEndDate = endDate ? new Date(endDate) : new Date();
+
+            // If user has active membership, extend from its end date
+            if (activeMembership && activeMembership.endDate > new Date()) {
+              membershipStartDate = new Date(activeMembership.endDate);
+              membershipStartDate.setDate(membershipStartDate.getDate() + 1); // Start day after expiration
+              membershipEndDate = new Date(membershipStartDate);
+              membershipEndDate.setDate(membershipEndDate.getDate() + durationDays);
+              
+              // Update existing membership to link with new payment (optional - for history)
+              logger.info(`Extending membership for user ${payment.userId} from existing membership`);
+            }
+
             // Create new membership
-            await Membership.create({
+            const newMembership = await Membership.create({
               userId: payment.userId,
               planId: planId,
               planName: planName,
               durationDays: durationDays,
               amount: payment.amount,
               currency: payment.currency,
-              startDate: new Date(startDate),
-              endDate: new Date(endDate),
+              startDate: membershipStartDate,
+              endDate: membershipEndDate,
               status: 'active',
               paymentId: payment._id,
               autoRenew: false,
             });
-            logger.info(`Membership created for payment ${payment._id}`);
+            
+            logger.info(`Membership created/activated for payment ${payment._id}`, {
+              membershipId: newMembership._id,
+              userId: payment.userId,
+              startDate: membershipStartDate,
+              endDate: membershipEndDate
+            });
+          } else {
+            // Membership already exists for this payment - reactivate if needed
+            if (existingMembership.status !== 'active') {
+              existingMembership.status = 'active';
+              await existingMembership.save();
+              logger.info(`Membership reactivated for payment ${payment._id}`);
+            }
           }
         } catch (membershipError) {
           // Log error but don't fail the webhook
-          logger.error(`Failed to create membership for payment ${payment._id}:`, membershipError);
+          logger.error(`Failed to create/activate membership for payment ${payment._id}:`, {
+            error: membershipError.message,
+            stack: membershipError.stack,
+            userId: payment.userId
+          });
         }
       }
 

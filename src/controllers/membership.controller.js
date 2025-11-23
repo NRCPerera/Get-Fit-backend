@@ -80,6 +80,17 @@ const purchaseMembership = async (req, res, next) => {
       return next(new ApiError('User not found', 404));
     }
 
+    // Ensure email is valid (PayHere requires valid email)
+    if (!user.email || typeof user.email !== 'string' || !user.email.trim() || !user.email.includes('@')) {
+      return next(new ApiError('Valid email address is required for payment. Please update your profile with a valid email address.', 400));
+    }
+
+    // Sanitize and validate email format
+    const userEmail = user.email.trim();
+    if (!userEmail.includes('.') || userEmail.length < 5) {
+      return next(new ApiError('Invalid email address format. Please ensure your email address is valid.', 400));
+    }
+
     // Generate unique order ID
     const orderId = `MEM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -115,17 +126,29 @@ const purchaseMembership = async (req, res, next) => {
     const firstName = nameParts[0] || 'Customer';
     const lastName = nameParts.slice(1).join(' ') || 'User';
 
+    // Log payment initialization details (without sensitive data)
+    const logger = require('../utils/logger');
+    logger.info('Initializing PayHere payment for membership:', {
+      orderId,
+      amount,
+      currency,
+      planId: plan.id,
+      planName: plan.name,
+      userId: user._id,
+      email: userEmail.substring(0, 5) + '...', // Log partial email for debugging
+      hasPhone: !!user.phone
+    });
+
     const paymentData = await payhereService.initializePayment({
       orderId: orderId,
       amount: amount,
       currency: currency,
       items: `${plan.name} Membership`,
-      first_name: firstName,
-      last_name: lastName,
-      email: user.email, // Required by PayHere
-      phone: user.phone || '0770000000',
-      address: user.address || '',
-      city: user.city || '',
+      customerName: user.name || 'Customer',
+      customerEmail: userEmail, // Required by PayHere - use sanitized email
+      customerPhone: user.phone || '', // Will use default if empty
+      customerAddress: user.address || '', // Optional
+      city: user.city || '', // Optional
       country: 'Sri Lanka',
       returnUrl: `${backendUrl}/payment/return?paymentId=${payment._id}&type=membership`,
       cancelUrl: `${backendUrl}/payment/cancel?paymentId=${payment._id}&type=membership`,
