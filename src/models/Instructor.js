@@ -33,7 +33,15 @@ const instructorSchema = new mongoose.Schema({
   certifications: [CertificationSchema],
   bio: { type: String, maxlength: 1000, trim: true },
   stats: { type: StatsSchema, default: () => ({}) },
-  isAvailable: { type: Boolean, default: true }
+  isAvailable: { type: Boolean, default: true },
+  beforePhoto: {
+    type: mongoose.Schema.Types.Mixed, // Mixed type to support Cloudinary object format { secure_url, public_id }
+    default: null
+  },
+  afterPhoto: {
+    type: mongoose.Schema.Types.Mixed, // Mixed type to support Cloudinary object format { secure_url, public_id }
+    default: null
+  }
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
 // Virtual populate of user details

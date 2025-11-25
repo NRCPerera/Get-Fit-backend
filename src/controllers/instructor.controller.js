@@ -82,6 +82,21 @@ const getAllInstructors = async (req, res, next) => {
           return null;
         }
         
+        // Helper function to normalize photo URL
+        const normalizePhotoUrl = (photoField) => {
+          if (!photoField) return null;
+          if (typeof photoField === 'object' && photoField.secure_url) {
+            return photoField.secure_url;
+          }
+          if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
+            return null; // Old local path, no longer served
+          }
+          if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
+            return photoField;
+          }
+          return photoField || null;
+        };
+
         return {
           _id: instructor._id?.toString() || instructor._id,
           name: userData.name || 'Instructor',
@@ -108,7 +123,9 @@ const getAllInstructors = async (req, res, next) => {
           hourlyRate: instructor.hourlyRate || 0,
           isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
           userId: instructor.userId?.toString(),
-          user: userData
+          user: userData,
+          beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
+          afterPhoto: normalizePhotoUrl(instructor.afterPhoto)
         };
       })
       .filter(Boolean); // Remove null entries
@@ -218,6 +235,21 @@ const getInstructorById = async (req, res, next) => {
     // Attach user data to instructor
     instructor.user = user;
 
+    // Helper function to normalize photo URL
+    const normalizePhotoUrl = (photoField) => {
+      if (!photoField) return null;
+      if (typeof photoField === 'object' && photoField.secure_url) {
+        return photoField.secure_url;
+      }
+      if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
+        return null; // Old local path, no longer served
+      }
+      if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
+        return photoField;
+      }
+      return photoField || null;
+    };
+
     // Transform instructor data to match frontend expectations
     const transformedInstructor = {
       _id: instructor._id?.toString() || instructor._id,
@@ -248,6 +280,8 @@ const getInstructorById = async (req, res, next) => {
       isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
       userId: instructor.userId?.toString(),
       user: user,
+      beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
+      afterPhoto: normalizePhotoUrl(instructor.afterPhoto),
       // Include all other instructor fields
       ...instructor
     };
@@ -300,6 +334,21 @@ const getMyProfile = async (req, res, next) => {
 
     const user = instructor.user || req.user;
     
+    // Helper function to normalize photo URL
+    const normalizePhotoUrl = (photoField) => {
+      if (!photoField) return null;
+      if (typeof photoField === 'object' && photoField.secure_url) {
+        return photoField.secure_url;
+      }
+      if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
+        return null; // Old local path, no longer served
+      }
+      if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
+        return photoField;
+      }
+      return photoField || null;
+    };
+
     // Transform data to match frontend expectations
     const profileData = {
       _id: instructor._id?.toString() || instructor._id,
@@ -336,7 +385,9 @@ const getMyProfile = async (req, res, next) => {
         totalEarnings: 0
       },
       userId: instructor.userId?.toString(),
-      user: user
+      user: user,
+      beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
+      afterPhoto: normalizePhotoUrl(instructor.afterPhoto)
     };
 
     res.json({
@@ -593,6 +644,110 @@ const checkSubscriptionStatus = async (req, res, next) => {
   }
 };
 
+const uploadBeforeAfterPhoto = async (req, res, next) => {
+  try {
+    const { photoType } = req.body; // 'before' or 'after'
+    const file = req.file;
+
+    if (!photoType || !['before', 'after'].includes(photoType)) {
+      return next(new ApiError('Photo type must be "before" or "after"', 400));
+    }
+
+    if (!file || !file.buffer) {
+      return next(new ApiError('No file uploaded', 400));
+    }
+
+    // Find instructor
+    const instructor = await Instructor.findOne({ userId: req.user.id });
+    if (!instructor) {
+      return next(new ApiError('Instructor profile not found', 404));
+    }
+
+    // Upload to Cloudinary
+    const cloudinaryService = require('../services/cloudinary.service');
+    const uploadResult = await cloudinaryService.uploadImage(
+      file,
+      `gym-management/instructors/${req.user.id}/transformation`
+    );
+
+    // Delete old photo if exists
+    const fieldName = photoType === 'before' ? 'beforePhoto' : 'afterPhoto';
+    const oldPhoto = instructor[fieldName];
+    if (oldPhoto && typeof oldPhoto === 'object' && oldPhoto.public_id) {
+      try {
+        await cloudinaryService.deleteFromCloudinary(oldPhoto.public_id, { resource_type: 'image' });
+      } catch (deleteError) {
+        console.error('Error deleting old photo:', deleteError);
+        // Continue even if deletion fails
+      }
+    }
+
+    // Update instructor with new photo
+    instructor[fieldName] = {
+      secure_url: uploadResult.secure_url,
+      public_id: uploadResult.public_id
+    };
+    await instructor.save();
+
+    res.json({
+      success: true,
+      message: `${photoType === 'before' ? 'Before' : 'After'} photo uploaded successfully`,
+      data: {
+        photo: {
+          secure_url: uploadResult.secure_url,
+          public_id: uploadResult.public_id
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Error uploading before/after photo:', err);
+    next(err);
+  }
+};
+
+const deleteBeforeAfterPhoto = async (req, res, next) => {
+  try {
+    const { photoType } = req.params; // 'before' or 'after'
+
+    if (!photoType || !['before', 'after'].includes(photoType)) {
+      return next(new ApiError('Photo type must be "before" or "after"', 400));
+    }
+
+    // Find instructor
+    const instructor = await Instructor.findOne({ userId: req.user.id });
+    if (!instructor) {
+      return next(new ApiError('Instructor profile not found', 404));
+    }
+
+    // Get old photo
+    const fieldName = photoType === 'before' ? 'beforePhoto' : 'afterPhoto';
+    const oldPhoto = instructor[fieldName];
+
+    // Delete from Cloudinary if exists
+    if (oldPhoto && typeof oldPhoto === 'object' && oldPhoto.public_id) {
+      try {
+        const cloudinaryService = require('../services/cloudinary.service');
+        await cloudinaryService.deleteFromCloudinary(oldPhoto.public_id, { resource_type: 'image' });
+      } catch (deleteError) {
+        console.error('Error deleting photo from Cloudinary:', deleteError);
+        // Continue even if deletion fails
+      }
+    }
+
+    // Remove photo from instructor
+    instructor[fieldName] = null;
+    await instructor.save();
+
+    res.json({
+      success: true,
+      message: `${photoType === 'before' ? 'Before' : 'After'} photo deleted successfully`
+    });
+  } catch (err) {
+    console.error('Error deleting before/after photo:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getAllInstructors,
   getInstructorById,
@@ -604,5 +759,7 @@ module.exports = {
   becomeInstructor,
   subscribeToInstructor,
   unsubscribeFromInstructor,
-  checkSubscriptionStatus
+  checkSubscriptionStatus,
+  uploadBeforeAfterPhoto,
+  deleteBeforeAfterPhoto
 };
