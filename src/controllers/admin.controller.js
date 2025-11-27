@@ -301,7 +301,7 @@ const createInstructor = async (req, res, next) => {
       // Instructor fields
       specializations,
       experience,
-      hourlyRate,
+      monthlyRate,
       availability,
       certifications,
       bio,
@@ -309,8 +309,8 @@ const createInstructor = async (req, res, next) => {
     } = req.body;
 
     // Validate required fields
-    if (!name || !email || !password || !hourlyRate) {
-      return next(new ApiError('Name, email, password, and hourly rate are required', 400));
+    if (!name || !email || !password || !monthlyRate) {
+      return next(new ApiError('Name, email, password, and monthly rate are required', 400));
     }
 
     // Check if user with this email already exists
@@ -336,7 +336,7 @@ const createInstructor = async (req, res, next) => {
       userId: user._id,
       specializations: specializations || [],
       experience: experience || 0,
-      hourlyRate: parseFloat(hourlyRate),
+      monthlyRate: parseFloat(monthlyRate),
       availability: availability || [],
       certifications: certifications || [],
       bio: bio || '',

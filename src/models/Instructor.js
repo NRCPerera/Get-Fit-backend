@@ -28,7 +28,7 @@ const instructorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
   specializations: [{ type: String, enum: SPECIALIZATIONS, index: true }],
   experience: { type: Number, min: 0 },
-  hourlyRate: { type: Number, required: true, min: 0 },
+  monthlyRate: { type: Number, required: true, min: 0 },
   availability: [AvailabilitySchema],
   certifications: [CertificationSchema],
   bio: { type: String, maxlength: 1000, trim: true },
