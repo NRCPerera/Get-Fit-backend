@@ -5,6 +5,20 @@ const config = require('../config/environment');
 /**
  * PayHere Payment Gateway Service
  * Documentation: https://www.payhere.lk/developers
+ * 
+ * DEBUG NOTES for "Unauthorized payment request" error:
+ * ----------------------------------------------------
+ * This error typically occurs due to:
+ * 1. Merchant ID mismatch - ensure PAYHERE_MERCHANT_ID matches PayHere dashboard
+ * 2. Merchant Secret mismatch - each domain/app has its OWN secret in PayHere
+ * 3. Hash calculation error - the hash must be calculated exactly as PayHere expects
+ * 4. Domain/App not matching - if your Render URL doesn't match PayHere's registered domain
+ * 
+ * PayHere requires DIFFERENT secrets for:
+ * - Mobile apps (e.g., com.getfit.app)
+ * - Web domains (e.g., getfit.lk, your-render-url.onrender.com)
+ * 
+ * Make sure your PAYHERE_MERCHANT_SECRET matches the domain/app making the request!
  */
 class PayHereService {
   constructor() {
@@ -15,17 +29,30 @@ class PayHereService {
       ? 'https://sandbox.payhere.lk'
       : 'https://www.payhere.lk';
 
-    // Safer logging (do not print full secrets)
+    // Enhanced logging for debugging
+    console.log('========================================');
+    console.log('🔧 PayHere Service Initialization');
+    console.log('========================================');
     console.log('PayHere Configuration:', {
-      merchantIdPreview: this.merchantId ? `${this.merchantId.slice(0, 4)}...` : 'NOT SET',
-      hasSecret: !!this.merchantSecret,
+      merchantId: this.merchantId || 'NOT SET',
+      merchantIdLength: this.merchantId ? this.merchantId.length : 0,
+      secretPreview: this.merchantSecret ? `${this.merchantSecret.slice(0, 8)}...${this.merchantSecret.slice(-4)}` : 'NOT SET',
+      secretLength: this.merchantSecret ? this.merchantSecret.length : 0,
       isSandbox: this.isSandbox,
       baseUrl: this.baseUrl,
+      backendUrl: config.BACKEND_URL || 'NOT SET',
+      nodeEnv: config.NODE_ENV,
     });
 
     if (!this.merchantId || !this.merchantSecret) {
-      console.warn('⚠️  PayHere credentials are missing! Check your .env file.');
+      console.error('❌ CRITICAL: PayHere credentials are missing!');
+      console.error('   Check your Render environment variables for:');
+      console.error('   - PAYHERE_MERCHANT_ID');
+      console.error('   - PAYHERE_MERCHANT_SECRET');
+    } else {
+      console.log('✅ PayHere credentials are configured');
     }
+    console.log('========================================');
   }
 
   /**
@@ -137,31 +164,54 @@ class PayHereService {
       amount: amountValue.toFixed(2),
     };
 
+    // ========================================
+    // DEBUG: Hash Calculation
+    // ========================================
+    console.log('----------------------------------------');
+    console.log('🔐 PayHere Hash Calculation Debug');
+    console.log('----------------------------------------');
+
     // PayHere requires a specific hash algorithm:
     // hash = md5(merchantId + orderId + amountFormatted + currency + hashedSecret).toString().toUpperCase()
     // where hashedSecret = md5(merchant_secret).toString().toUpperCase()
-    
+
     // Step 1: Hash the merchant secret (hashedSecret)
     const hashedSecret = crypto.createHash('md5')
       .update(String(this.merchantSecret))
       .digest('hex')
       .toUpperCase();
-    
+
+    console.log('Step 1 - Hashed Secret (MD5 of merchant_secret):');
+    console.log(`   Secret used (first 8 chars): ${this.merchantSecret ? this.merchantSecret.substring(0, 8) : 'MISSING'}...`);
+    console.log(`   HashedSecret: ${hashedSecret}`);
+
     // Step 2: Format amount to 2 decimal places
     const amountFormatted = amountValue.toFixed(2);
-    
+    console.log('Step 2 - Amount formatted:', amountFormatted);
+
     // Step 3: Concatenate: merchantId + orderId + amountFormatted + currency + hashedSecret
-    const hashInput = String(params.merchant_id) + 
-                      String(params.order_id) + 
-                      amountFormatted + 
-                      String(params.currency).toUpperCase() + 
-                      hashedSecret;
-    
+    const hashInput = String(params.merchant_id) +
+      String(params.order_id) +
+      amountFormatted +
+      String(params.currency).toUpperCase() +
+      hashedSecret;
+
+    console.log('Step 3 - Hash Input Components:');
+    console.log(`   merchant_id: ${params.merchant_id}`);
+    console.log(`   order_id: ${params.order_id}`);
+    console.log(`   amount: ${amountFormatted}`);
+    console.log(`   currency: ${params.currency.toUpperCase()}`);
+    console.log(`   hashedSecret: ${hashedSecret}`);
+    console.log(`   Full hash input (without hashedSecret): ${params.merchant_id}${params.order_id}${amountFormatted}${params.currency.toUpperCase()}[HASHED_SECRET]`);
+
     // Step 4: Hash the concatenated string and convert to uppercase
     const hash = crypto.createHash('md5')
       .update(hashInput)
       .digest('hex')
       .toUpperCase();
+
+    console.log('Step 4 - Final Hash:', hash);
+    console.log('----------------------------------------');
 
     params.hash = hash;
 
@@ -184,7 +234,7 @@ class PayHereService {
       'amount',
       'hash' // REQUIRED from 2023-01-16
     ];
-    
+
     const missingParams = requiredParams.filter(p => !params[p] || params[p] === '');
     if (missingParams.length > 0) {
       throw new Error(`Missing required PayHere parameters: ${missingParams.join(', ')}`);
@@ -193,26 +243,32 @@ class PayHereService {
     // Payment URL
     const paymentUrl = `${this.baseUrl}/pay/checkout`;
 
-    if (this.isSandbox) {
-      console.log('Prepared PayHere params (all required params included):', {
-        merchant_id: params.merchant_id,
-        return_url: params.return_url,
-        cancel_url: params.cancel_url,
-        notify_url: params.notify_url,
-        first_name: params.first_name,
-        last_name: params.last_name,
-        email: params.email.substring(0, 10) + '...',
-        phone: params.phone,
-        address: params.address.substring(0, 30) + '...',
-        city: params.city,
-        country: params.country,
-        order_id: params.order_id,
-        items: params.items.substring(0, 30) + '...',
-        currency: params.currency,
-        amount: params.amount,
-        hash: `${params.hash.substring(0, 8)}...`,
-      });
-    }
+    // ========================================
+    // DEBUG: Full Payment Parameters
+    // ========================================
+    console.log('========================================');
+    console.log('📤 PayHere Payment Request Details');
+    console.log('========================================');
+    console.log('Payment URL:', paymentUrl);
+    console.log('All Parameters:', {
+      merchant_id: params.merchant_id,
+      return_url: params.return_url,
+      cancel_url: params.cancel_url,
+      notify_url: params.notify_url,
+      first_name: params.first_name,
+      last_name: params.last_name,
+      email: `${params.email.substring(0, 10)}...`,
+      phone: params.phone,
+      address: `${params.address.substring(0, 30)}...`,
+      city: params.city,
+      country: params.country,
+      order_id: params.order_id,
+      items: `${params.items.substring(0, 30)}...`,
+      currency: params.currency,
+      amount: params.amount,
+      hash: params.hash,
+    });
+    console.log('========================================');
 
     return {
       paymentUrl,
