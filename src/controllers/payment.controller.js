@@ -609,6 +609,160 @@ const createSubscriptionPaymentWithSavedCard = async (req, res, next) => {
   return next(new ApiError('Saved card payments are not available with PayHere. Please use the regular payment flow.', 400));
 };
 
+/**
+ * Manual payment completion - called when user returns from PayHere
+ * This is a workaround for unreliable webhook notifications from PayHere sandbox
+ * The mobile app should call this after the user completes payment on PayHere
+ */
+const markPaymentComplete = async (req, res, next) => {
+  try {
+    const { paymentId } = req.params;
+
+    if (!paymentId) {
+      return next(new ApiError('Payment ID is required', 400));
+    }
+
+    // Find the payment - must belong to the current user
+    const payment = await Payment.findOne({
+      _id: paymentId,
+      userId: req.user.id
+    });
+
+    if (!payment) {
+      return next(new ApiError('Payment not found', 404));
+    }
+
+    // Only update if payment is still pending
+    if (payment.status === 'completed') {
+      return res.json({
+        success: true,
+        message: 'Payment already completed',
+        data: { payment }
+      });
+    }
+
+    if (payment.status === 'failed' || payment.status === 'refunded') {
+      return next(new ApiError(`Cannot complete payment with status: ${payment.status}`, 400));
+    }
+
+    // Mark payment as completed
+    payment.status = 'completed';
+    payment.transactionDate = new Date();
+    await payment.save();
+
+    logger.info(`Payment manually marked as completed: ${payment._id}`, {
+      userId: req.user.id,
+      orderId: payment.payhereOrderId
+    });
+
+    // Handle membership activation (same logic as webhook)
+    if (payment.metadata && payment.metadata.type === 'membership') {
+      try {
+        const Membership = require('../models/Membership');
+        const { planId, planName, durationDays, startDate, endDate } = payment.metadata;
+
+        // Check if membership already exists for this payment
+        const existingMembership = await Membership.findOne({ paymentId: payment._id });
+
+        if (!existingMembership) {
+          // Check if user has an active membership
+          const activeMembership = await Membership.findOne({
+            userId: payment.userId,
+            status: 'active',
+            endDate: { $gt: new Date() }
+          }).sort({ endDate: -1 });
+
+          let membershipStartDate = startDate ? new Date(startDate) : new Date();
+          let membershipEndDate = endDate ? new Date(endDate) : new Date();
+
+          // If user has active membership, extend from its end date
+          if (activeMembership && activeMembership.endDate > new Date()) {
+            membershipStartDate = new Date(activeMembership.endDate);
+            membershipStartDate.setDate(membershipStartDate.getDate() + 1);
+            membershipEndDate = new Date(membershipStartDate);
+            membershipEndDate.setDate(membershipEndDate.getDate() + durationDays);
+            logger.info(`Extending membership for user ${payment.userId} from existing membership`);
+          }
+
+          // Create new membership
+          const newMembership = await Membership.create({
+            userId: payment.userId,
+            planId: planId,
+            planName: planName,
+            durationDays: durationDays,
+            amount: payment.amount,
+            currency: payment.currency,
+            startDate: membershipStartDate,
+            endDate: membershipEndDate,
+            status: 'active',
+            paymentId: payment._id,
+            autoRenew: false,
+          });
+
+          logger.info(`Membership created for payment ${payment._id}`, {
+            membershipId: newMembership._id,
+            userId: payment.userId
+          });
+        } else if (existingMembership.status !== 'active') {
+          existingMembership.status = 'active';
+          await existingMembership.save();
+          logger.info(`Membership reactivated for payment ${payment._id}`);
+        }
+      } catch (membershipError) {
+        logger.error(`Failed to create membership for payment ${payment._id}:`, membershipError);
+      }
+    }
+
+    // Handle subscription activation (same logic as webhook)
+    if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
+      try {
+        const Subscription = require('../models/Subscription');
+
+        const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
+
+        if (!existingSubscription) {
+          const activeSubscription = await Subscription.findOne({
+            memberId: payment.userId,
+            instructorId: payment.instructorId,
+            status: 'active'
+          });
+
+          if (activeSubscription) {
+            activeSubscription.status = 'active';
+            activeSubscription.subscribedAt = new Date();
+            activeSubscription.cancelledAt = null;
+            activeSubscription.paymentId = payment._id;
+            await activeSubscription.save();
+            logger.info(`Subscription reactivated for payment ${payment._id}`);
+          } else {
+            await Subscription.create({
+              memberId: payment.userId,
+              instructorId: payment.instructorId,
+              status: 'active',
+              paymentId: payment._id,
+              subscribedAt: new Date()
+            });
+            logger.info(`Subscription created for payment ${payment._id}`);
+          }
+        }
+      } catch (subscriptionError) {
+        logger.error(`Failed to create subscription for payment ${payment._id}:`, subscriptionError);
+      }
+    }
+
+    // Send payment receipt
+    await sendPaymentReceipt(payment);
+
+    res.json({
+      success: true,
+      message: 'Payment marked as completed successfully',
+      data: { payment }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   createPaymentIntent,
   confirmPayment,
@@ -622,5 +776,6 @@ module.exports = {
   getSavedCards,
   deleteSavedCard,
   setDefaultCard,
-  createSubscriptionPaymentWithSavedCard
+  createSubscriptionPaymentWithSavedCard,
+  markPaymentComplete
 };
