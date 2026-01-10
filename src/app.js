@@ -36,7 +36,7 @@ app.use(helmet());
 // In development, allow all origins for mobile device testing
 // In production, use the configured allowed origins
 const corsOptions = {
-  origin: config.NODE_ENV === 'development' 
+  origin: config.NODE_ENV === 'development'
     ? true // Allow all origins in development (for mobile devices)
     : config.ALLOWED_ORIGINS,
   credentials: true,
@@ -63,8 +63,21 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // PayHere webhook requires raw body for signature verification
-// This must be before JSON parsing middleware
-app.use('/api/v1/payments/payhere-notify', express.raw({ type: 'application/x-www-form-urlencoded' }));
+// Custom middleware to capture raw body BEFORE express.json() parses it
+app.use('/api/v1/payments/payhere-notify', (req, res, next) => {
+  let data = '';
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    data += chunk;
+  });
+  req.on('end', () => {
+    req.rawBody = data;
+    // Also parse it as form data for req.body
+    const querystring = require('querystring');
+    req.body = querystring.parse(data);
+    next();
+  });
+});
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -102,6 +115,17 @@ app.use('/uploads', (req, res, next) => {
     success: false,
     error: 'File not found. Files are now stored in Cloudinary. Please re-upload your profile picture or exercise video.',
     path: req.path
+  });
+});
+
+// Root route handler (prevents 404 for health checks and direct access)
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Get-Fit API Server',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    documentation: '/health for status'
   });
 });
 

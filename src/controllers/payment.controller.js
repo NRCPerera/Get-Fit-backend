@@ -217,8 +217,28 @@ const handlePayHereWebhook = async (req, res, next) => {
     }
 
     // Parse form-urlencoded data
+    // The rawBody middleware in app.js should have already parsed req.body
+    // But we have fallbacks just in case
     const querystring = require('querystring');
-    const body = req.rawBody ? querystring.parse(req.rawBody.toString()) : req.body;
+    let body;
+
+    if (req.rawBody && typeof req.rawBody === 'string') {
+      // rawBody was captured as a string by our middleware
+      body = querystring.parse(req.rawBody);
+      logger.info('Using parsed rawBody (string)');
+    } else if (req.rawBody && Buffer.isBuffer(req.rawBody)) {
+      // rawBody is a Buffer
+      body = querystring.parse(req.rawBody.toString());
+      logger.info('Using parsed rawBody (buffer)');
+    } else if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+      // Body was already parsed by middleware
+      body = req.body;
+      logger.info('Using pre-parsed req.body');
+    } else {
+      // Fallback: try to read from raw request
+      logger.warn('No rawBody found and req.body is empty. PayHere webhook may not process correctly.');
+      body = req.body || {};
+    }
 
     logger.info('Parsed webhook body:', JSON.stringify(body, null, 2));
 
