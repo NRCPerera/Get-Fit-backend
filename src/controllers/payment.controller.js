@@ -15,21 +15,21 @@ const sendPaymentReceipt = async (payment) => {
     // Populate user details
     await payment.populate('userId', 'name email');
     const user = payment.userId;
-    
+
     if (!user || !user.email) {
       logger.warn(`Cannot send receipt: User or email not found for payment ${payment._id}`);
       return;
     }
-    
+
     let instructorName = null;
-    
+
     // If this is a subscription payment, get instructor name
     if (payment.instructorId) {
       const Instructor = require('../models/Instructor');
       const instructor = await Instructor.findOne({ userId: payment.instructorId }).populate('userId', 'name');
       instructorName = instructor?.userId?.name || null;
     }
-    
+
     await sendPaymentReceiptEmail(user.email, user.name, {
       orderId: payment.payhereOrderId,
       paymentId: payment.payherePaymentId,
@@ -39,7 +39,7 @@ const sendPaymentReceipt = async (payment) => {
       transactionDate: payment.transactionDate || payment.createdAt,
       instructorName: instructorName
     });
-    
+
     logger.info(`Payment receipt email sent to ${user.email} for payment ${payment._id}`);
   } catch (emailError) {
     // Log error but don't throw - payment is already completed
@@ -109,7 +109,7 @@ const createPaymentIntent = async (req, res, next) => {
     // App will check payment status when user returns
     // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
     const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
-    
+
     // Log payment initialization details (without sensitive data)
     logger.info('Initializing PayHere payment (createPaymentIntent):', {
       orderId,
@@ -202,7 +202,17 @@ const getInstructorEarnings = async (req, res, next) => {
 // Handle PayHere webhook/notification
 const handlePayHereWebhook = async (req, res, next) => {
   try {
+    // Enhanced logging to debug webhook reception
+    logger.info('========================================');
+    logger.info('📥 PayHere Webhook Received!');
+    logger.info('========================================');
+    logger.info('Timestamp:', new Date().toISOString());
+    logger.info('Headers:', JSON.stringify(req.headers, null, 2));
+    logger.info('Raw Body exists:', !!req.rawBody);
+    logger.info('Body exists:', !!req.body);
+
     if (!config.PAYHERE_MERCHANT_ID || !config.PAYHERE_MERCHANT_SECRET) {
+      logger.error('PayHere not configured - missing credentials');
       return next(new ApiError('PayHere not configured', 500));
     }
 
@@ -210,36 +220,46 @@ const handlePayHereWebhook = async (req, res, next) => {
     const querystring = require('querystring');
     const body = req.rawBody ? querystring.parse(req.rawBody.toString()) : req.body;
 
+    logger.info('Parsed webhook body:', JSON.stringify(body, null, 2));
+
     // Verify payment notification
     const verification = payhereService.verifyPayment(body);
 
+    logger.info('Verification result:', JSON.stringify(verification, null, 2));
+
     if (!verification.valid) {
+      logger.error('Webhook verification FAILED:', verification.error);
       return next(new ApiError(`Webhook verification failed: ${verification.error}`, 400));
     }
 
     // Find payment by order ID
     const payment = await Payment.findOne({ payhereOrderId: verification.orderId });
 
+    logger.info('Payment lookup result:', payment ? `Found payment ${payment._id}` : 'Payment NOT FOUND');
+
     if (!payment) {
+      logger.warn('Payment not found for order:', verification.orderId);
       return res.json({ received: true, message: 'Payment not found' });
     }
 
     // Update payment status
     if (verification.success) {
+      logger.info('✅ Payment SUCCESS - Updating payment status to completed');
       payment.status = 'completed';
       payment.payherePaymentId = verification.paymentId;
       payment.transactionDate = new Date();
       await payment.save();
+      logger.info('✅ Payment updated successfully:', payment._id);
 
       // If this is a membership payment, create/activate membership (same pattern as subscriptions)
       if (payment.metadata && payment.metadata.type === 'membership') {
         try {
           const Membership = require('../models/Membership');
           const { planId, planName, durationDays, startDate, endDate } = payment.metadata;
-          
+
           // Check if membership already exists for this payment
           const existingMembership = await Membership.findOne({ paymentId: payment._id });
-          
+
           if (!existingMembership) {
             // Check if user has an active membership - if so, extend it from the end date
             // Otherwise, use the start date from metadata (or current date)
@@ -258,7 +278,7 @@ const handlePayHereWebhook = async (req, res, next) => {
               membershipStartDate.setDate(membershipStartDate.getDate() + 1); // Start day after expiration
               membershipEndDate = new Date(membershipStartDate);
               membershipEndDate.setDate(membershipEndDate.getDate() + durationDays);
-              
+
               // Update existing membership to link with new payment (optional - for history)
               logger.info(`Extending membership for user ${payment.userId} from existing membership`);
             }
@@ -277,7 +297,7 @@ const handlePayHereWebhook = async (req, res, next) => {
               paymentId: payment._id,
               autoRenew: false,
             });
-            
+
             logger.info(`Membership created/activated for payment ${payment._id}`, {
               membershipId: newMembership._id,
               userId: payment.userId,
@@ -306,10 +326,10 @@ const handlePayHereWebhook = async (req, res, next) => {
       if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
         try {
           const Subscription = require('../models/Subscription');
-          
+
           // Check if subscription already exists for this payment
           const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
-          
+
           if (!existingSubscription) {
             // Check if user already has an active subscription to this instructor
             const activeSubscription = await Subscription.findOne({
@@ -362,11 +382,11 @@ const refundPayment = async (req, res, next) => {
   try {
     const { paymentId } = req.params;
     const payment = await Payment.findById(paymentId);
-    
+
     if (!payment) {
       return next(new ApiError('Payment not found', 404));
     }
-    
+
     if (payment.status !== 'completed') {
       return next(new ApiError('Only completed payments can be refunded', 400));
     }
@@ -375,7 +395,7 @@ const refundPayment = async (req, res, next) => {
     // For now, we'll just mark it as refunded in our system
     payment.status = 'refunded';
     await payment.save();
-    
+
     res.json({
       success: true,
       message: 'Payment marked as refunded. Please process refund through PayHere merchant portal.',
@@ -471,7 +491,7 @@ const createSubscriptionPayment = async (req, res, next) => {
     // App will check payment status when user returns
     // BACKEND_URL should be set to your Render.com URL (e.g., https://get-fit-backend-mpk7.onrender.com)
     const backendUrl = config.BACKEND_URL || `http://localhost:${config.PORT}`;
-    
+
     // Log payment initialization details (without sensitive data)
     logger.info('Initializing PayHere payment:', {
       orderId,
