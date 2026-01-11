@@ -11,6 +11,7 @@ const normalizePlans = () => MEMBERSHIP_PLANS.map(plan => ({
   id: plan.id,
   name: plan.name,
   price: plan.price,
+  priceFemale: plan.priceFemale,
   currency: plan.currency || 'LKR',
   durationDays: plan.durationDays,
   description: plan.description || '',
@@ -62,6 +63,12 @@ const purchaseMembership = async (req, res, next) => {
     const plan = MEMBERSHIP_PLANS.find(p => p.id === planId);
     if (!plan) return next(new ApiError('Invalid membership plan', 400));
 
+    // Get user details first to check gender
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return next(new ApiError('User not found', 404));
+    }
+
     // Determine start date based on existing membership
     await refreshMembershipStatuses(req.user.id);
     const lastMembership = await Membership.findOne({ userId: req.user.id }).sort({ endDate: -1 });
@@ -73,12 +80,6 @@ const purchaseMembership = async (req, res, next) => {
     }
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + plan.durationDays);
-
-    // Get user details
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return next(new ApiError('User not found', 404));
-    }
 
     // Ensure email is valid (PayHere requires valid email)
     if (!user.email || typeof user.email !== 'string' || !user.email.trim() || !user.email.includes('@')) {
@@ -94,8 +95,14 @@ const purchaseMembership = async (req, res, next) => {
     // Generate unique order ID
     const orderId = `MEM_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // Use plan price based on gender
+    let finalPrice = plan.price;
+    if (user.gender === 'Female' && plan.priceFemale) {
+      finalPrice = plan.priceFemale;
+    }
+
     // Use plan price and default currency LKR for PayHere
-    const amount = Number(plan.price);
+    const amount = Number(finalPrice);
     const currency = 'LKR'; // PayHere primary currency - ensure sandbox supports your currency if different
 
     // Create payment record with pending status

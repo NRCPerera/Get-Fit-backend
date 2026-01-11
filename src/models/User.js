@@ -43,6 +43,11 @@ const userSchema = new mongoose.Schema({
   dateOfBirth: {
     type: Date
   },
+  gender: {
+    type: String,
+    enum: ['Male', 'Female', 'Other'],
+    default: 'Male'
+  },
   isEmailVerified: {
     type: Boolean,
     default: false
@@ -94,7 +99,7 @@ userSchema.index({ isActive: 1 });
 /**
  * Hash password before saving
  */
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   // Only hash the password if it has been modified (or is new)
   if (!this.isModified('password')) return next();
 
@@ -111,19 +116,19 @@ userSchema.pre('save', async function(next) {
 /**
  * Compare password method
  */
-userSchema.methods.comparePassword = async function(candidatePassword) {
+userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
 /**
  * Generate JWT access token
  */
-userSchema.methods.generateAccessToken = function() {
+userSchema.methods.generateAccessToken = function () {
   return jwt.sign(
-    { 
-      id: this._id, 
-      email: this.email, 
-      role: this.role 
+    {
+      id: this._id,
+      email: this.email,
+      role: this.role
     },
     config.JWT_SECRET,
     { expiresIn: config.JWT_EXPIRE }
@@ -133,18 +138,18 @@ userSchema.methods.generateAccessToken = function() {
 /**
  * Generate JWT auth token (alias for access token to match app expectations)
  */
-userSchema.methods.generateAuthToken = function() {
+userSchema.methods.generateAuthToken = function () {
   return this.generateAccessToken();
 };
 
 /**
  * Generate JWT refresh token
  */
-userSchema.methods.generateRefreshToken = function() {
+userSchema.methods.generateRefreshToken = function () {
   return jwt.sign(
-    { 
-      id: this._id, 
-      email: this.email 
+    {
+      id: this._id,
+      email: this.email
     },
     config.JWT_REFRESH_SECRET,
     { expiresIn: config.JWT_REFRESH_EXPIRE }
@@ -154,7 +159,7 @@ userSchema.methods.generateRefreshToken = function() {
 /**
  * Generate email verification token
  */
-userSchema.methods.generateEmailVerificationToken = function() {
+userSchema.methods.generateEmailVerificationToken = function () {
   const token = jwt.sign(
     { id: this._id, email: this.email },
     config.JWT_SECRET,
@@ -167,7 +172,7 @@ userSchema.methods.generateEmailVerificationToken = function() {
 /**
  * Generate email verification OTP (6-digit code)
  */
-userSchema.methods.generateEmailVerificationOTP = function() {
+userSchema.methods.generateEmailVerificationOTP = function () {
   // Generate 6-digit OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   this.emailVerificationOTP = otp;
@@ -178,7 +183,7 @@ userSchema.methods.generateEmailVerificationOTP = function() {
 /**
  * Generate password reset token
  */
-userSchema.methods.generatePasswordResetToken = function() {
+userSchema.methods.generatePasswordResetToken = function () {
   const token = jwt.sign(
     { id: this._id },
     config.JWT_SECRET,
@@ -192,7 +197,7 @@ userSchema.methods.generatePasswordResetToken = function() {
 /**
  * Generate password reset OTP (6-digit code)
  */
-userSchema.methods.generatePasswordResetOTP = function() {
+userSchema.methods.generatePasswordResetOTP = function () {
   // Generate 6-digit OTP
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   this.passwordResetOTP = otp;
@@ -203,7 +208,7 @@ userSchema.methods.generatePasswordResetOTP = function() {
 /**
  * Get user profile (without sensitive data)
  */
-userSchema.methods.getProfile = function() {
+userSchema.methods.getProfile = function () {
   // Return secure_url if profilePicture is an object, null for old local paths
   let profilePicture = null;
   if (this.profilePicture) {
@@ -240,6 +245,7 @@ userSchema.methods.getProfile = function() {
     dateOfBirth: this.dateOfBirth,
     isEmailVerified: this.isEmailVerified,
     isActive: this.isActive,
+    gender: this.gender,
     createdAt: this.createdAt,
     lastLogin: this.lastLogin
   };

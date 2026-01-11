@@ -18,7 +18,7 @@ const register = async (req, res, next) => {
       return next(new ApiError(errorMessages.join(', '), 400));
     }
 
-    const { name, email, password, role, phone, dateOfBirth } = req.body;
+    const { name, email, password, role, phone, dateOfBirth, gender } = req.body;
 
     // Check if user already exists
     const existingUser = await User.findOne({ email });
@@ -33,7 +33,8 @@ const register = async (req, res, next) => {
       password,
       role: role || 'member',
       phone,
-      dateOfBirth
+      dateOfBirth,
+      gender
     });
 
     // Generate tokens
@@ -86,7 +87,7 @@ const login = async (req, res, next) => {
 
     // Find user and include password
     const user = await User.findOne({ email }).select('+password');
-    
+
     if (!user) {
       return next(new ApiError('Invalid email or password', 401));
     }
@@ -161,7 +162,7 @@ const refreshToken = async (req, res, next) => {
 
     // Verify refresh token
     const decoded = jwt.verify(refreshToken, config.JWT_REFRESH_SECRET);
-    
+
     // Find user
     const user = await User.findById(decoded.id);
     if (!user || !user.isActive) {
@@ -307,7 +308,7 @@ const verifyEmail = async (req, res, next) => {
       }
       throw jwtError;
     }
-    
+
     // Find user with verification token
     const user = await User.findOne({
       _id: decoded.id
