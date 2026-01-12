@@ -610,14 +610,14 @@ const createSubscriptionPaymentWithSavedCard = async (req, res, next) => {
 };
 
 /**
- * Complete payment - called when user returns from PayHere
- * This function completes pending payments that were created within the last hour.
- * This is a fallback for PayHere's unreliable webhooks in sandbox mode.
+ * Check payment status - called by frontend to poll payment status
+ * This function ONLY checks and returns the current payment status.
+ * It does NOT complete payments - that should only happen via:
+ * 1. PayHere webhook (handlePayHereWebhook)
+ * 2. Return URL handler (when PayHere redirects back after successful payment)
  * 
- * Security measures:
- * 1. Payment must belong to the authenticated user
- * 2. Payment must have been created within the last hour
- * 3. Payment must be in pending status
+ * This prevents the exploit where users get free subscriptions/memberships
+ * by calling this endpoint before actually completing payment.
  */
 const markPaymentComplete = async (req, res, next) => {
   try {
@@ -637,11 +637,14 @@ const markPaymentComplete = async (req, res, next) => {
       return next(new ApiError('Payment not found', 404));
     }
 
-    logger.info(`Payment completion requested: ${payment._id}`, {
+    logger.info(`Payment status check: ${payment._id}`, {
       userId: req.user.id,
       orderId: payment.payhereOrderId,
       currentStatus: payment.status
     });
+
+    // Return current payment status - DO NOT automatically mark as complete
+    // Only the PayHere webhook or return URL handler should complete payments
 
     // If payment is already completed, return success
     if (payment.status === 'completed') {
@@ -661,128 +664,11 @@ const markPaymentComplete = async (req, res, next) => {
       });
     }
 
-    // Payment is pending - check if it was created within the last hour
-    // This is a security measure to prevent completing old/stale payments
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    if (payment.createdAt < oneHourAgo) {
-      logger.warn(`Payment completion denied - payment too old: ${payment._id} (created ${payment.createdAt})`);
-      return res.json({
-        success: false,
-        message: 'Payment expired. Please initiate a new payment.',
-        data: { payment }
-      });
-    }
-
-    // Complete the payment (fallback for unreliable PayHere webhooks)
-    payment.status = 'completed';
-    payment.transactionDate = new Date();
-    await payment.save();
-
-    logger.info(`Payment marked as completed via API: ${payment._id}`, {
-      userId: req.user.id,
-      orderId: payment.payhereOrderId
-    });
-
-    // Handle membership activation
-    if (payment.metadata && payment.metadata.type === 'membership') {
-      try {
-        const Membership = require('../models/Membership');
-        const { planId, planName, durationDays, startDate, endDate } = payment.metadata;
-
-        const existingMembership = await Membership.findOne({ paymentId: payment._id });
-
-        if (!existingMembership) {
-          const activeMembership = await Membership.findOne({
-            userId: payment.userId,
-            status: 'active',
-            endDate: { $gt: new Date() }
-          }).sort({ endDate: -1 });
-
-          let membershipStartDate = startDate ? new Date(startDate) : new Date();
-          let membershipEndDate = endDate ? new Date(endDate) : new Date();
-
-          if (activeMembership && activeMembership.endDate > new Date()) {
-            membershipStartDate = new Date(activeMembership.endDate);
-            membershipStartDate.setDate(membershipStartDate.getDate() + 1);
-            membershipEndDate = new Date(membershipStartDate);
-            membershipEndDate.setDate(membershipEndDate.getDate() + durationDays);
-          }
-
-          await Membership.create({
-            userId: payment.userId,
-            planId: planId,
-            planName: planName,
-            durationDays: durationDays,
-            amount: payment.amount,
-            currency: payment.currency,
-            startDate: membershipStartDate,
-            endDate: membershipEndDate,
-            status: 'active',
-            paymentId: payment._id,
-            autoRenew: false,
-          });
-
-          logger.info(`Membership created via API for payment ${payment._id}`);
-        }
-      } catch (membershipError) {
-        logger.error(`Failed to create membership via API:`, membershipError);
-      }
-    }
-
-    // Handle subscription activation
-    if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
-      try {
-        const Subscription = require('../models/Subscription');
-
-        const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
-
-        if (!existingSubscription) {
-          // Calculate expiry date (1 month from now)
-          const subscribedAt = new Date();
-          const expiresAt = new Date(subscribedAt);
-          expiresAt.setMonth(expiresAt.getMonth() + 1);
-
-          const activeSubscription = await Subscription.findOne({
-            memberId: payment.userId,
-            instructorId: payment.instructorId,
-            status: 'active'
-          });
-
-          if (activeSubscription) {
-            // Extend existing subscription by 1 month from current expiry or now
-            const baseDate = activeSubscription.expiresAt > new Date()
-              ? new Date(activeSubscription.expiresAt)
-              : new Date();
-            const newExpiresAt = new Date(baseDate);
-            newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
-
-            activeSubscription.status = 'active';
-            activeSubscription.subscribedAt = subscribedAt;
-            activeSubscription.expiresAt = newExpiresAt;
-            activeSubscription.cancelledAt = null;
-            activeSubscription.paymentId = payment._id;
-            await activeSubscription.save();
-          } else {
-            await Subscription.create({
-              memberId: payment.userId,
-              instructorId: payment.instructorId,
-              status: 'active',
-              paymentId: payment._id,
-              subscribedAt: subscribedAt,
-              expiresAt: expiresAt
-            });
-          }
-
-          logger.info(`Subscription created via API for payment ${payment._id}, expires: ${expiresAt}`);
-        }
-      } catch (subscriptionError) {
-        logger.error(`Failed to create subscription via API:`, subscriptionError);
-      }
-    }
-
+    // Payment is still pending - waiting for PayHere to confirm via return URL or webhook
+    // DO NOT mark as complete here - this is a security vulnerability!
     res.json({
-      success: true,
-      message: 'Payment completed successfully',
+      success: false,
+      message: 'Payment is still being processed. Please wait for PayHere confirmation.',
       data: { payment }
     });
   } catch (err) {
