@@ -1,37 +1,42 @@
 const mongoose = require('mongoose');
 
 const subscriptionSchema = new mongoose.Schema({
-  memberId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true, 
-    index: true 
+  memberId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
   },
-  instructorId: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'User', 
-    required: true, 
-    index: true 
+  instructorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
   },
-  status: { 
-    type: String, 
-    enum: ['active', 'cancelled'], 
+  status: {
+    type: String,
+    enum: ['active', 'cancelled', 'expired'],
     default: 'active',
     index: true
   },
-  subscribedAt: { 
-    type: Date, 
-    default: Date.now 
+  subscribedAt: {
+    type: Date,
+    default: Date.now
   },
-  cancelledAt: { 
-    type: Date 
+  expiresAt: {
+    type: Date,
+    required: true,
+    index: true
+  },
+  cancelledAt: {
+    type: Date
   },
   paymentId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Payment',
     index: true
   }
-}, { 
+}, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true }

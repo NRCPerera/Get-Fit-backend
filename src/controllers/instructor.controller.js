@@ -18,7 +18,7 @@ const getAllInstructors = async (req, res, next) => {
     if (q) {
       const User = require('../models/User');
       const searchRegex = new RegExp(q, 'i');
-      
+
       try {
         const matchingUsers = await User.find({
           $or: [
@@ -50,7 +50,7 @@ const getAllInstructors = async (req, res, next) => {
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Find instructors - DO NOT use populate yet, we'll do it manually
     const items = await Instructor.find(filter)
       .skip(skip)
@@ -64,7 +64,7 @@ const getAllInstructors = async (req, res, next) => {
     const users = await User.find({ _id: { $in: userIds } })
       .select('_id name email profilePicture')
       .lean();
-    
+
     // Create a map for quick lookup
     const userMap = {};
     users.forEach(user => {
@@ -75,13 +75,13 @@ const getAllInstructors = async (req, res, next) => {
     const transformedItems = items
       .map(instructor => {
         const userData = userMap[instructor.userId?.toString()];
-        
+
         // Skip instructors without valid user data
         if (!userData) {
           console.warn(`Instructor ${instructor._id} has no user data for userId: ${instructor.userId}`);
           return null;
         }
-        
+
         // Helper function to normalize photo URL
         const normalizePhotoUrl = (photoField) => {
           if (!photoField) return null;
@@ -151,14 +151,14 @@ const getAllInstructors = async (req, res, next) => {
 const getInstructorById = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     if (!id) {
       return next(new ApiError('Instructor ID is required', 400));
     }
 
     const mongoose = require('mongoose');
     const logger = require('../utils/logger');
-    
+
     logger.info(`Searching for instructor with ID: ${id}`);
 
     let instructor = null;
@@ -169,7 +169,7 @@ const getInstructorById = async (req, res, next) => {
     if (mongoose.Types.ObjectId.isValid(id)) {
       try {
         instructor = await Instructor.findById(id).lean();
-        
+
         if (instructor) {
           logger.info(`Found instructor by _id: ${id}`);
         }
@@ -181,7 +181,7 @@ const getInstructorById = async (req, res, next) => {
     // 2. If not found, try finding by userId (string match)
     if (!instructor) {
       instructor = await Instructor.findOne({ userId: id }).lean();
-      
+
       if (instructor) {
         logger.info(`Found instructor by userId (string): ${id}`);
       }
@@ -192,7 +192,7 @@ const getInstructorById = async (req, res, next) => {
       try {
         const objectId = new mongoose.Types.ObjectId(id);
         instructor = await Instructor.findOne({ userId: objectId }).lean();
-        
+
         if (instructor) {
           logger.info(`Found instructor by userId (ObjectId): ${id}`);
         }
@@ -207,20 +207,20 @@ const getInstructorById = async (req, res, next) => {
         .select('_id userId')
         .limit(10)
         .lean();
-      
+
       logger.warn(`Instructor not found. Searched ID: ${id}. Sample instructor IDs:`,
         allInstructors.map(i => ({
           _id: i._id.toString(),
           userId: i.userId?.toString()
         }))
       );
-      
+
       return next(new ApiError(`Instructor not found with ID: ${id}`, 404));
     }
 
     // Manually fetch the user data
     logger.info(`Fetching user data for userId: ${instructor.userId}`);
-    
+
     const user = await User.findById(instructor.userId)
       .select('_id name email profilePicture')
       .lean();
@@ -327,13 +327,13 @@ const updateInstructorProfile = async (req, res, next) => {
 const getMyProfile = async (req, res, next) => {
   try {
     const instructor = await Instructor.findOne({ userId: req.user.id }).populate('user');
-    
+
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
     const user = instructor.user || req.user;
-    
+
     // Helper function to normalize photo URL
     const normalizePhotoUrl = (photoField) => {
       if (!photoField) return null;
@@ -422,7 +422,7 @@ const getMyClients = async (req, res, next) => {
   try {
     const Subscription = require('../models/Subscription');
     const Instructor = require('../models/Instructor');
-    
+
     // Get instructor profile to find userId
     const instructor = await Instructor.findOne({ userId: req.user.id });
     if (!instructor) {
@@ -544,6 +544,11 @@ const subscribeToInstructor = async (req, res, next) => {
       return next(new ApiError('Instructor not found', 404));
     }
 
+    // Calculate subscription dates (1 month from now)
+    const subscribedAt = new Date();
+    const expiresAt = new Date(subscribedAt);
+    expiresAt.setMonth(expiresAt.getMonth() + 1);
+
     // Check if already subscribed
     const existing = await Subscription.findOne({
       memberId: req.user.id,
@@ -551,12 +556,19 @@ const subscribeToInstructor = async (req, res, next) => {
     });
 
     if (existing) {
-      if (existing.status === 'active') {
+      if (existing.status === 'active' && existing.expiresAt > new Date()) {
         return next(new ApiError('Already subscribed to this instructor', 400));
       } else {
-        // Reactivate subscription with new payment
+        // Reactivate subscription with new payment - extend from current expiry or now
+        const baseDate = existing.expiresAt > new Date()
+          ? new Date(existing.expiresAt)
+          : new Date();
+        const newExpiresAt = new Date(baseDate);
+        newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
+
         existing.status = 'active';
-        existing.subscribedAt = new Date();
+        existing.subscribedAt = subscribedAt;
+        existing.expiresAt = newExpiresAt;
         existing.cancelledAt = null;
         existing.paymentId = paymentId;
         await existing.save();
@@ -568,12 +580,14 @@ const subscribeToInstructor = async (req, res, next) => {
       }
     }
 
-    // Create new subscription with payment reference
+    // Create new subscription with payment reference and expiry date
     const subscription = await Subscription.create({
       memberId: req.user.id,
       instructorId: instructorId,
       status: 'active',
-      paymentId: paymentId
+      paymentId: paymentId,
+      subscribedAt: subscribedAt,
+      expiresAt: expiresAt
     });
 
     res.status(201).json({
@@ -631,11 +645,25 @@ const checkSubscriptionStatus = async (req, res, next) => {
       status: 'active'
     });
 
+    // Check if subscription exists and is not expired
+    let isSubscribed = false;
+    if (subscription) {
+      if (subscription.expiresAt && subscription.expiresAt <= new Date()) {
+        // Subscription has expired - update status
+        subscription.status = 'expired';
+        await subscription.save();
+        isSubscribed = false;
+      } else {
+        isSubscribed = true;
+      }
+    }
+
     res.json({
       success: true,
-      data: { 
-        isSubscribed: !!subscription,
-        subscription: subscription || null
+      data: {
+        isSubscribed: isSubscribed,
+        subscription: isSubscribed ? subscription : null,
+        expiresAt: isSubscribed ? subscription.expiresAt : null
       }
     });
   } catch (err) {

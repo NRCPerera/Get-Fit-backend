@@ -223,6 +223,11 @@ app.get('/payment/return', async (req, res) => {
               const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
 
               if (!existingSubscription) {
+                // Calculate expiry date (1 month from now)
+                const subscribedAt = new Date();
+                const expiresAt = new Date(subscribedAt);
+                expiresAt.setMonth(expiresAt.getMonth() + 1);
+
                 const activeSubscription = await Subscription.findOne({
                   memberId: payment.userId,
                   instructorId: payment.instructorId,
@@ -230,8 +235,16 @@ app.get('/payment/return', async (req, res) => {
                 });
 
                 if (activeSubscription) {
+                  // Extend existing subscription by 1 month from current expiry or now
+                  const baseDate = activeSubscription.expiresAt > new Date()
+                    ? new Date(activeSubscription.expiresAt)
+                    : new Date();
+                  const newExpiresAt = new Date(baseDate);
+                  newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
+
                   activeSubscription.status = 'active';
-                  activeSubscription.subscribedAt = new Date();
+                  activeSubscription.subscribedAt = subscribedAt;
+                  activeSubscription.expiresAt = newExpiresAt;
                   activeSubscription.cancelledAt = null;
                   activeSubscription.paymentId = payment._id;
                   await activeSubscription.save();
@@ -241,11 +254,12 @@ app.get('/payment/return', async (req, res) => {
                     instructorId: payment.instructorId,
                     status: 'active',
                     paymentId: payment._id,
-                    subscribedAt: new Date()
+                    subscribedAt: subscribedAt,
+                    expiresAt: expiresAt
                   });
                 }
 
-                logger.info(`Subscription created via return URL for payment ${payment._id}`);
+                logger.info(`Subscription created via return URL for payment ${payment._id}, expires: ${expiresAt}`);
               }
             } catch (subscriptionError) {
               logger.error(`Failed to create subscription via return URL:`, subscriptionError);
