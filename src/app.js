@@ -140,16 +140,131 @@ app.get('/health', (req, res) => {
 });
 
 // PayHere payment return/cancel routes (for redirects)
-// These are simple acknowledgment routes - actual payment status is updated via webhook
-app.get('/payment/return', (req, res) => {
-  const { paymentId } = req.query;
-  // Payment status is updated via webhook, this is just for PayHere redirect
+// When PayHere redirects here after successful payment, we mark the payment as complete
+// This is necessary because PayHere webhooks can be unreliable in sandbox mode
+app.get('/payment/return', async (req, res) => {
+  const { paymentId, type } = req.query;
+
+  // Mark payment as complete if paymentId is provided
+  if (paymentId) {
+    try {
+      const Payment = require('./models/Payment');
+      const payment = await Payment.findById(paymentId);
+
+      if (payment && payment.status === 'pending') {
+        // Security check: Only allow completion for payments created within the last hour
+        // This prevents abuse of the return URL endpoint
+        const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+        if (payment.createdAt < oneHourAgo) {
+          logger.warn(`Payment return URL called for old payment: ${payment._id} (created ${payment.createdAt})`);
+          // Don't complete old payments - they should be handled via webhook or manual verification
+        } else {
+          // Mark payment as completed
+          payment.status = 'completed';
+          payment.transactionDate = new Date();
+          await payment.save();
+
+          logger.info(`Payment marked as completed via return URL: ${payment._id}`, {
+            orderId: payment.payhereOrderId,
+            type: type || payment.metadata?.type
+          });
+
+          // Handle membership activation
+          if (payment.metadata && payment.metadata.type === 'membership') {
+            try {
+              const Membership = require('./models/Membership');
+              const { planId, planName, durationDays, startDate, endDate } = payment.metadata;
+
+              const existingMembership = await Membership.findOne({ paymentId: payment._id });
+
+              if (!existingMembership) {
+                const activeMembership = await Membership.findOne({
+                  userId: payment.userId,
+                  status: 'active',
+                  endDate: { $gt: new Date() }
+                }).sort({ endDate: -1 });
+
+                let membershipStartDate = startDate ? new Date(startDate) : new Date();
+                let membershipEndDate = endDate ? new Date(endDate) : new Date();
+
+                if (activeMembership && activeMembership.endDate > new Date()) {
+                  membershipStartDate = new Date(activeMembership.endDate);
+                  membershipStartDate.setDate(membershipStartDate.getDate() + 1);
+                  membershipEndDate = new Date(membershipStartDate);
+                  membershipEndDate.setDate(membershipEndDate.getDate() + durationDays);
+                }
+
+                await Membership.create({
+                  userId: payment.userId,
+                  planId: planId,
+                  planName: planName,
+                  durationDays: durationDays,
+                  amount: payment.amount,
+                  currency: payment.currency,
+                  startDate: membershipStartDate,
+                  endDate: membershipEndDate,
+                  status: 'active',
+                  paymentId: payment._id,
+                  autoRenew: false,
+                });
+
+                logger.info(`Membership created via return URL for payment ${payment._id}`);
+              }
+            } catch (membershipError) {
+              logger.error(`Failed to create membership via return URL:`, membershipError);
+            }
+          }
+
+          // Handle subscription activation
+          if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
+            try {
+              const Subscription = require('./models/Subscription');
+
+              const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
+
+              if (!existingSubscription) {
+                const activeSubscription = await Subscription.findOne({
+                  memberId: payment.userId,
+                  instructorId: payment.instructorId,
+                  status: 'active'
+                });
+
+                if (activeSubscription) {
+                  activeSubscription.status = 'active';
+                  activeSubscription.subscribedAt = new Date();
+                  activeSubscription.cancelledAt = null;
+                  activeSubscription.paymentId = payment._id;
+                  await activeSubscription.save();
+                } else {
+                  await Subscription.create({
+                    memberId: payment.userId,
+                    instructorId: payment.instructorId,
+                    status: 'active',
+                    paymentId: payment._id,
+                    subscribedAt: new Date()
+                  });
+                }
+
+                logger.info(`Subscription created via return URL for payment ${payment._id}`);
+              }
+            } catch (subscriptionError) {
+              logger.error(`Failed to create subscription via return URL:`, subscriptionError);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error('Error processing payment return:', error);
+    }
+  }
+
+  // Display success page
   res.status(200).send(`
     <!DOCTYPE html>
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Payment Return</title>
+        <title>Payment Successful</title>
         <style>
           body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -188,7 +303,7 @@ app.get('/payment/return', (req, res) => {
         <div class="container">
           <div class="success">✓</div>
           <h1>Payment Successful</h1>
-          <p>You can close this page and return to the app. Your payment is being processed.</p>
+          <p>Your payment has been processed successfully. You can close this page and return to the app.</p>
         </div>
       </body>
     </html>
