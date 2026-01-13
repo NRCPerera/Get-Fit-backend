@@ -45,8 +45,7 @@ const userSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-    enum: ['Male', 'Female', 'Other'],
-    default: 'Male'
+    enum: ['Male', 'Female', 'Other', 'Prefer not to say']
   },
   isEmailVerified: {
     type: Boolean,
