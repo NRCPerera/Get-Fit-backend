@@ -162,9 +162,28 @@ const changePassword = async (req, res, next) => {
 
 const deleteAccount = async (req, res, next) => {
   try {
-    await User.findByIdAndUpdate(req.user.id, { isActive: false });
-    res.json({ success: true, message: 'Account deactivated' });
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return next(new ApiError('User not found', 404));
+    }
+
+    // Delete profile picture from Cloudinary if exists
+    if (user.profilePicture && typeof user.profilePicture === 'object' && user.profilePicture.public_id) {
+      try {
+        await deleteFromCloudinary(user.profilePicture.public_id, { resource_type: 'image' });
+      } catch (deleteError) {
+        logger.warn('Failed to delete profile picture during account deletion:', deleteError);
+      }
+    }
+
+    // Permanently delete the user account
+    await User.findByIdAndDelete(req.user.id);
+
+    logger.info('User account permanently deleted', { userId: req.user.id, email: user.email });
+
+    res.json({ success: true, message: 'Account permanently deleted' });
   } catch (err) {
+    logger.error('Account deletion failed:', { userId: req.user.id, error: err.message });
     next(err);
   }
 };
