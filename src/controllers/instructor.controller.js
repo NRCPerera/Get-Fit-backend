@@ -438,19 +438,21 @@ const getMyClients = async (req, res, next) => {
       .sort({ subscribedAt: -1 })
       .lean();
 
-    // Transform to client format
-    const clients = subscriptions.map(sub => {
-      const member = sub.memberId;
-      return {
-        _id: member._id,
-        name: member.name,
-        email: member.email,
-        phone: member.phone,
-        profilePicture: member.profilePicture,
-        subscribedAt: sub.subscribedAt,
-        subscriptionId: sub._id
-      };
-    });
+    // Transform to client format, filtering out any subscriptions with deleted members
+    const clients = subscriptions
+      .filter(sub => sub.memberId != null) // Filter out subscriptions where member was deleted
+      .map(sub => {
+        const member = sub.memberId;
+        return {
+          _id: member._id,
+          name: member.name,
+          email: member.email,
+          phone: member.phone,
+          profilePicture: member.profilePicture,
+          subscribedAt: sub.subscribedAt,
+          subscriptionId: sub._id
+        };
+      });
 
     res.json({
       success: true,
