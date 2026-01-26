@@ -23,6 +23,7 @@ const adminRoutes = require('./routes/admin.routes');
 const measurementRoutes = require('./routes/measurement.routes');
 const membershipRoutes = require('./routes/membership.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const messageRoutes = require('./routes/message.routes');
 
 const app = express();
 
@@ -390,6 +391,7 @@ app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/measurements', measurementRoutes);
 app.use('/api/v1/memberships', membershipRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1/messages', messageRoutes);
 
 // 404 handler
 app.use(notFound);
