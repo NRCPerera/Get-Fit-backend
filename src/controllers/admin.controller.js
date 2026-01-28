@@ -32,7 +32,7 @@ const getDashboardStats = async (req, res, next) => {
       // Total instructors
       Instructor.countDocuments({}),
       // Active today (users who logged in today)
-      User.countDocuments({ 
+      User.countDocuments({
         lastLogin: { $gte: todayStart },
         role: 'member',
         isActive: true
@@ -74,13 +74,13 @@ const getDashboardStats = async (req, res, next) => {
     ]);
 
     // Calculate percentage changes
-    const revenueChange = lastMonthRevenue[0]?.total 
+    const revenueChange = lastMonthRevenue[0]?.total
       ? ((monthlyRevenue[0]?.total || 0) - lastMonthRevenue[0].total) / lastMonthRevenue[0].total * 100
       : 0;
 
     // Format recent activity
     const recentActivity = [];
-    
+
     // Add recent users
     recentUsers.forEach(user => {
       recentActivity.push({
@@ -188,7 +188,7 @@ const getAllUsers = async (req, res, next) => {
     const filter = {};
     if (role) filter.role = role;
     if (isActive !== undefined) filter.isActive = isActive === 'true';
-    
+
     // Handle status filter (active/inactive)
     if (status && status !== 'all') {
       filter.isActive = status === 'active';
@@ -198,7 +198,7 @@ const getAllUsers = async (req, res, next) => {
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    
+
     // Get user stats
     const [
       totalUsers,
@@ -449,7 +449,7 @@ const getAnalytics = async (req, res, next) => {
     const thisWeekStart = new Date(now);
     thisWeekStart.setDate(now.getDate() - now.getDay()); // Start of week (Sunday)
     thisWeekStart.setHours(0, 0, 0, 0);
-    
+
     const lastWeekStart = new Date(thisWeekStart);
     lastWeekStart.setDate(lastWeekStart.getDate() - 7);
     const lastWeekEnd = new Date(thisWeekStart);
@@ -608,6 +608,56 @@ const getAnalytics = async (req, res, next) => {
   }
 };
 
+const allocateInstructor = async (req, res, next) => {
+  try {
+    const { memberId, instructorId } = req.body;
+
+    if (!memberId || !instructorId) {
+      return next(new ApiError('Member ID and Instructor ID are required', 400));
+    }
+
+    // specific validation: check if member exists
+    const member = await User.findById(memberId);
+    if (!member || member.role !== 'member') {
+      return next(new ApiError('Member not found or user is not a member', 404));
+    }
+
+    // check if instructor exists
+    const instructorUser = await User.findOne({ _id: instructorId, role: 'instructor' });
+    if (!instructorUser) {
+      return next(new ApiError('Instructor not found', 404));
+    }
+
+    // Check if subscription already exists
+    const existingSubscription = await Subscription.findOne({
+      memberId,
+      instructorId,
+      status: 'active'
+    });
+
+    if (existingSubscription) {
+      return next(new ApiError('Active subscription already exists for this member and instructor', 400));
+    }
+
+    // Create subscription
+    const subscription = await Subscription.create({
+      memberId,
+      instructorId,
+      status: 'active',
+      // No payment ID
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Default 30 days
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Instructor allocated successfully',
+      data: { subscription }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -619,7 +669,8 @@ module.exports = {
   createInstructor,
   getAllPayments,
   getAllExercises,
-  getAnalytics
+  getAnalytics,
+  allocateInstructor
 };
 
 
