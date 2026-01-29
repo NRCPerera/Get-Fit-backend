@@ -6,6 +6,7 @@ const connectDB = require('./config/database');
 const config = require('./config/environment');
 const logger = require('./utils/logger');
 const { handleUnhandledRejection, handleUncaughtException } = require('./middlewares/error.middleware');
+const { startScheduler, stopScheduler } = require('./services/scheduler.service');
 
 // Handle uncaught exceptions
 handleUncaughtException();
@@ -23,11 +24,16 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   logger.info(`Server running in ${config.NODE_ENV} mode on port ${PORT}`);
   logger.info(`Server accessible at http://localhost:${PORT}`);
   logger.info(`For mobile devices, use your computer's local IP address (e.g., http://192.168.1.100:${PORT})`);
+
+  // Start the scheduler for automatic expiration of subscriptions and memberships
+  // Runs every hour (60 * 60 * 1000 ms)
+  startScheduler(60 * 60 * 1000);
 });
 
 // Handle server shutdown gracefully
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
+  stopScheduler();
   server.close(() => {
     logger.info('Process terminated');
     process.exit(0);
@@ -36,6 +42,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   logger.info('SIGINT received. Shutting down gracefully...');
+  stopScheduler();
   server.close(() => {
     logger.info('Process terminated');
     process.exit(0);

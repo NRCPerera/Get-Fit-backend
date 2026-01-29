@@ -429,6 +429,17 @@ const getMyClients = async (req, res, next) => {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
+    // First, expire any subscriptions that have passed their expiry date
+    const now = new Date();
+    await Subscription.updateMany(
+      {
+        instructorId: req.user.id,
+        status: 'active',
+        expiresAt: { $lte: now }
+      },
+      { $set: { status: 'expired' } }
+    );
+
     // Get all active subscriptions for this instructor
     const subscriptions = await Subscription.find({
       instructorId: req.user.id,
@@ -450,6 +461,7 @@ const getMyClients = async (req, res, next) => {
           phone: member.phone,
           profilePicture: member.profilePicture,
           subscribedAt: sub.subscribedAt,
+          expiresAt: sub.expiresAt,
           subscriptionId: sub._id
         };
       });
