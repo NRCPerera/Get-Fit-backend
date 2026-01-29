@@ -358,6 +358,51 @@ const getUnreadCount = async (req, res, next) => {
   }
 };
 
+// User: Register push token
+const registerPushToken = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return next(new ApiError('Push token is required', 400));
+    }
+
+    // Validate Expo push token format
+    if (!token.startsWith('ExponentPushToken[') && !token.startsWith('ExpoPushToken[')) {
+      return next(new ApiError('Invalid Expo push token format', 400));
+    }
+
+    await User.findByIdAndUpdate(req.user.id, { expoPushToken: token });
+
+    logger.info('Push token registered', { userId: req.user.id });
+
+    res.json({
+      success: true,
+      message: 'Push token registered successfully'
+    });
+  } catch (err) {
+    logger.error('Error registering push token:', err);
+    next(err);
+  }
+};
+
+// User: Remove push token (for logout)
+const removePushToken = async (req, res, next) => {
+  try {
+    await User.findByIdAndUpdate(req.user.id, { expoPushToken: null });
+
+    logger.info('Push token removed', { userId: req.user.id });
+
+    res.json({
+      success: true,
+      message: 'Push token removed successfully'
+    });
+  } catch (err) {
+    logger.error('Error removing push token:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   // Admin endpoints
   createNotification,
@@ -369,6 +414,8 @@ module.exports = {
   getMyNotifications,
   markAsRead,
   markAllAsRead,
-  getUnreadCount
+  getUnreadCount,
+  registerPushToken,
+  removePushToken
 };
 

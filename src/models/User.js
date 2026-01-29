@@ -85,6 +85,10 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: {
     type: Date
+  },
+  expoPushToken: {
+    type: String,
+    default: null
   }
 }, {
   timestamps: true

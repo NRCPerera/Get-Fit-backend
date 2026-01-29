@@ -375,8 +375,24 @@ const sendMessage = async (req, res, next) => {
 
         await conversation.save();
 
-        // Get sender info for response
+        // Get sender info for response and notification
         const sender = await User.findById(userId).select('name email profilePicture');
+
+        // Determine recipient ID and send push notification
+        const recipientId = recipientRole === 'member'
+            ? conversation.member.toString()
+            : conversation.instructor.toString();
+
+        // Send push notification to recipient (async, don't wait)
+        const notificationService = require('../services/notification.service');
+        notificationService.sendMessageNotification(
+            recipientId,
+            sender.name,
+            content.trim(),
+            conversationId
+        ).catch(err => {
+            console.error('Error sending message notification:', err);
+        });
 
         let profilePicture = null;
         if (sender?.profilePicture) {

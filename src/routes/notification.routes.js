@@ -11,7 +11,9 @@ const {
   getMyNotifications,
   markAsRead,
   markAllAsRead,
-  getUnreadCount
+  getUnreadCount,
+  registerPushToken,
+  removePushToken
 } = require('../controllers/notification.controller');
 
 // Admin routes (require admin role)
@@ -27,5 +29,8 @@ router.get('/me/unread-count', verifyToken, getUnreadCount);
 router.post('/:id/read', verifyToken, markAsRead);
 router.post('/me/read-all', verifyToken, markAllAsRead);
 
-module.exports = router;
+// Push notification token routes
+router.post('/push-token', verifyToken, registerPushToken);
+router.delete('/push-token', verifyToken, removePushToken);
 
+module.exports = router;
