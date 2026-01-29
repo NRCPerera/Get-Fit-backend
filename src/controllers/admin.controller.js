@@ -221,6 +221,29 @@ const getAllUsers = async (req, res, next) => {
       User.countDocuments(filter)
     ]);
 
+    // Get all member IDs from the fetched users
+    const memberIds = users.filter(u => u.role === 'member').map(u => u._id);
+
+    // Fetch active subscriptions for these members
+    const subscriptions = await Subscription.find({
+      memberId: { $in: memberIds },
+      status: 'active'
+    })
+      .populate('instructorId', 'name email')
+      .lean();
+
+    // Create a map of memberId to subscription info
+    const subscriptionMap = {};
+    subscriptions.forEach(sub => {
+      subscriptionMap[sub.memberId.toString()] = {
+        isAllocated: true,
+        instructorId: sub.instructorId?._id,
+        instructorName: sub.instructorId?.name || 'Unknown',
+        expiresAt: sub.expiresAt,
+        source: sub.paymentId ? 'subscribed' : 'allocated'
+      };
+    });
+
     res.json({
       success: true,
       data: {
@@ -230,15 +253,20 @@ const getAllUsers = async (req, res, next) => {
           inactive: inactiveUsers,
           new: newThisMonth
         },
-        users: users.map(user => ({
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role.charAt(0).toUpperCase() + user.role.slice(1),
-          status: user.isActive ? 'active' : 'inactive',
-          joinDate: user.createdAt,
-          lastActive: user.lastLogin || user.createdAt
-        })),
+        users: users.map(user => {
+          const allocation = subscriptionMap[user._id.toString()];
+          return {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role.charAt(0).toUpperCase() + user.role.slice(1),
+            status: user.isActive ? 'active' : 'inactive',
+            joinDate: user.createdAt,
+            lastActive: user.lastLogin || user.createdAt,
+            // Allocation info for members
+            allocation: user.role === 'member' ? (allocation || { isAllocated: false }) : null
+          };
+        }),
         pagination: {
           total,
           page: parseInt(page),
