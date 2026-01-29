@@ -608,6 +608,91 @@ const getAnalytics = async (req, res, next) => {
   }
 };
 
+const getAllSubscriptions = async (req, res, next) => {
+  try {
+    const { status, limit = 50, page = 1 } = req.query;
+    const filter = {};
+
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Get subscription stats
+    const [
+      totalCount,
+      activeCount,
+      expiredCount,
+      cancelledCount,
+      subscriptions
+    ] = await Promise.all([
+      Subscription.countDocuments({}),
+      Subscription.countDocuments({ status: 'active' }),
+      Subscription.countDocuments({ status: 'expired' }),
+      Subscription.countDocuments({ status: 'cancelled' }),
+      Subscription.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('memberId', 'name email phone profilePicture')
+        .populate('instructorId', 'name email profilePicture')
+        .populate('paymentId', 'amount status createdAt')
+        .lean()
+    ]);
+
+    // Transform subscriptions for frontend
+    const transformedSubscriptions = subscriptions.map(sub => ({
+      _id: sub._id,
+      member: sub.memberId ? {
+        _id: sub.memberId._id,
+        name: sub.memberId.name,
+        email: sub.memberId.email,
+        phone: sub.memberId.phone
+      } : null,
+      instructor: sub.instructorId ? {
+        _id: sub.instructorId._id,
+        name: sub.instructorId.name,
+        email: sub.instructorId.email
+      } : null,
+      status: sub.status,
+      subscribedAt: sub.subscribedAt,
+      expiresAt: sub.expiresAt,
+      cancelledAt: sub.cancelledAt,
+      // Determine source: 'allocated' (no payment) or 'subscribed' (with payment)
+      source: sub.paymentId ? 'subscribed' : 'allocated',
+      payment: sub.paymentId ? {
+        _id: sub.paymentId._id,
+        amount: sub.paymentId.amount,
+        status: sub.paymentId.status,
+        date: sub.paymentId.createdAt
+      } : null,
+      createdAt: sub.createdAt
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        stats: {
+          total: totalCount,
+          active: activeCount,
+          expired: expiredCount,
+          cancelled: cancelledCount
+        },
+        subscriptions: transformedSubscriptions,
+        pagination: {
+          total: await Subscription.countDocuments(filter),
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(await Subscription.countDocuments(filter) / parseInt(limit))
+        }
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 const allocateInstructor = async (req, res, next) => {
   try {
     const { memberId, instructorId } = req.body;
@@ -670,6 +755,7 @@ module.exports = {
   getAllPayments,
   getAllExercises,
   getAnalytics,
+  getAllSubscriptions,
   allocateInstructor
 };
 

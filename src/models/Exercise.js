@@ -31,7 +31,7 @@ exerciseSchema.index({ difficulty: 1 });
 exerciseSchema.index({ muscleGroups: 1 });
 
 // Virtual: averageRating derived from reviews
-exerciseSchema.virtual('averageRating').get(function() {
+exerciseSchema.virtual('averageRating').get(function () {
   // Placeholder: actual aggregation should be computed in queries if reviews exist per exercise in future
   return this._averageRating || 0;
 });
@@ -39,15 +39,15 @@ exerciseSchema.virtual('averageRating').get(function() {
 /**
  * Normalize video/image URLs - converts Cloudinary objects to URLs, filters out old local paths
  */
-exerciseSchema.methods.getSafeUrls = function() {
+exerciseSchema.methods.getSafeUrls = function () {
   const normalizeUrl = (urlField) => {
     if (!urlField) return null;
-    
+
     // Cloudinary object format
     if (typeof urlField === 'object' && urlField.secure_url) {
       return urlField.secure_url;
     }
-    
+
     // String format
     if (typeof urlField === 'string') {
       // Old local path - return null (file no longer exists)
@@ -59,7 +59,7 @@ exerciseSchema.methods.getSafeUrls = function() {
         return urlField;
       }
     }
-    
+
     return null;
   };
 
@@ -81,14 +81,14 @@ exerciseSchema.methods.getSafeUrls = function() {
 /**
  * Transform exercise for API response (includes normalized URLs)
  */
-exerciseSchema.methods.toResponseObject = function() {
+exerciseSchema.methods.toResponseObject = function () {
   const safeUrls = this.getSafeUrls();
   const exerciseObj = this.toObject();
-  
+
   // Replace with normalized URLs
   exerciseObj.videoUrl = safeUrls.videoUrl;
   exerciseObj.imageUrl = safeUrls.imageUrl;
-  
+
   // Add full data if needed
   if (safeUrls.videoUrlData) {
     exerciseObj.videoUrlData = safeUrls.videoUrlData;
@@ -96,7 +96,7 @@ exerciseSchema.methods.toResponseObject = function() {
   if (safeUrls.imageUrlData) {
     exerciseObj.imageUrlData = safeUrls.imageUrlData;
   }
-  
+
   return exerciseObj;
 };
 
