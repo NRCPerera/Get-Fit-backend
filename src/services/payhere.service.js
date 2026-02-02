@@ -24,7 +24,11 @@ class PayHereService {
   constructor() {
     this.merchantId = config.PAYHERE_MERCHANT_ID;
     this.merchantSecret = config.PAYHERE_MERCHANT_SECRET;
-    this.isSandbox = config.PAYHERE_SANDBOX === 'true' || config.PAYHERE_SANDBOX === true || config.NODE_ENV !== 'production';
+    // PAYHERE_SANDBOX explicitly set to 'false' means production mode
+    // Only use sandbox if PAYHERE_SANDBOX is 'true' or not set and NODE_ENV is not production
+    const sandboxEnv = config.PAYHERE_SANDBOX;
+    this.isSandbox = sandboxEnv === 'true' || sandboxEnv === true || 
+      (sandboxEnv !== 'false' && sandboxEnv !== false && config.NODE_ENV !== 'production');
     this.baseUrl = this.isSandbox
       ? 'https://sandbox.payhere.lk'
       : 'https://www.payhere.lk';
