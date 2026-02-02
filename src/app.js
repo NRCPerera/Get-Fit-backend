@@ -325,8 +325,24 @@ app.get('/payment/return', async (req, res) => {
   `);
 });
 
-app.get('/payment/cancel', (req, res) => {
+app.get('/payment/cancel', async (req, res) => {
   const { paymentId } = req.query;
+  
+  // Delete the pending payment record when cancelled
+  if (paymentId) {
+    try {
+      const Payment = require('./models/Payment');
+      const payment = await Payment.findById(paymentId);
+      
+      if (payment && payment.status === 'pending') {
+        await Payment.findByIdAndDelete(paymentId);
+        logger.info(`Cancelled and deleted pending payment: ${paymentId}`);
+      }
+    } catch (err) {
+      logger.error(`Error deleting cancelled payment ${paymentId}:`, err.message);
+    }
+  }
+  
   res.status(200).send(`
     <!DOCTYPE html>
     <html>
@@ -392,6 +408,29 @@ app.use('/api/v1/measurements', measurementRoutes);
 app.use('/api/v1/memberships', membershipRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/messages', messageRoutes);
+
+// Cleanup stale pending payments on startup and periodically
+const cleanupStalePendingPayments = async () => {
+  try {
+    const Payment = require('./models/Payment');
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const result = await Payment.deleteMany({ 
+      status: 'pending', 
+      createdAt: { $lt: oneHourAgo } 
+    });
+    if (result.deletedCount > 0) {
+      logger.info(`Cleaned up ${result.deletedCount} stale pending payment(s)`);
+    }
+  } catch (err) {
+    logger.error('Error cleaning up stale pending payments:', err.message);
+  }
+};
+
+// Run cleanup on startup (after a short delay to ensure DB connection)
+setTimeout(cleanupStalePendingPayments, 5000);
+
+// Run cleanup every 30 minutes
+setInterval(cleanupStalePendingPayments, 30 * 60 * 1000);
 
 // 404 handler
 app.use(notFound);

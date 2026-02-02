@@ -179,7 +179,19 @@ const confirmPayment = async (req, res, next) => {
 
 const getPaymentHistory = async (req, res, next) => {
   try {
-    const items = await Payment.find({ userId: req.user.id }).sort({ createdAt: -1 });
+    // Clean up old pending payments (older than 1 hour) for this user
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await Payment.deleteMany({ 
+      userId: req.user.id, 
+      status: 'pending', 
+      createdAt: { $lt: oneHourAgo } 
+    });
+    
+    // Exclude pending payments from history - only show completed, failed, or refunded
+    const items = await Payment.find({ 
+      userId: req.user.id,
+      status: { $ne: 'pending' }
+    }).sort({ createdAt: -1 });
     res.json({ success: true, data: { items } });
   } catch (err) {
     next(err);
