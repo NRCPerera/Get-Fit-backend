@@ -24,6 +24,7 @@ const measurementRoutes = require('./routes/measurement.routes');
 const membershipRoutes = require('./routes/membership.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const messageRoutes = require('./routes/message.routes');
+const workoutRoutes = require('./routes/workout.routes');
 
 const app = express();
 
@@ -327,13 +328,13 @@ app.get('/payment/return', async (req, res) => {
 
 app.get('/payment/cancel', async (req, res) => {
   const { paymentId } = req.query;
-  
+
   // Delete the pending payment record when cancelled
   if (paymentId) {
     try {
       const Payment = require('./models/Payment');
       const payment = await Payment.findById(paymentId);
-      
+
       if (payment && payment.status === 'pending') {
         await Payment.findByIdAndDelete(paymentId);
         logger.info(`Cancelled and deleted pending payment: ${paymentId}`);
@@ -342,7 +343,7 @@ app.get('/payment/cancel', async (req, res) => {
       logger.error(`Error deleting cancelled payment ${paymentId}:`, err.message);
     }
   }
-  
+
   res.status(200).send(`
     <!DOCTYPE html>
     <html>
@@ -408,15 +409,16 @@ app.use('/api/v1/measurements', measurementRoutes);
 app.use('/api/v1/memberships', membershipRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/messages', messageRoutes);
+app.use('/api/v1/workouts', workoutRoutes);
 
 // Cleanup stale pending payments on startup and periodically
 const cleanupStalePendingPayments = async () => {
   try {
     const Payment = require('./models/Payment');
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const result = await Payment.deleteMany({ 
-      status: 'pending', 
-      createdAt: { $lt: oneHourAgo } 
+    const result = await Payment.deleteMany({
+      status: 'pending',
+      createdAt: { $lt: oneHourAgo }
     });
     if (result.deletedCount > 0) {
       logger.info(`Cleaned up ${result.deletedCount} stale pending payment(s)`);
