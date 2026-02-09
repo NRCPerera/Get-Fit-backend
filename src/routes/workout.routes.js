@@ -1,24 +1,21 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middlewares/auth.middleware');
+const { verifyToken } = require('../middlewares/auth.middleware');
+const { requireAdmin } = require('../middlewares/role.middleware');
 const workoutController = require('../controllers/workout.controller');
 
 // Public route - get active workouts for mobile app
 router.get('/public', workoutController.getPublicWorkouts);
 
-// Protected routes
-router.use(authenticate);
-
-// Get all workouts (admin)
-router.get('/', authorize('admin'), workoutController.getAllWorkouts);
-
-// Get workout by ID
+// Get workout by ID (public - for mobile app to view workout details)
 router.get('/:id', workoutController.getWorkoutById);
 
-// Admin only routes
-router.post('/', authorize('admin'), workoutController.createWorkout);
-router.put('/:id', authorize('admin'), workoutController.updateWorkout);
-router.patch('/:id/status', authorize('admin'), workoutController.toggleWorkoutStatus);
-router.delete('/:id', authorize('admin'), workoutController.deleteWorkout);
+// Admin routes - require authentication and admin role
+router.get('/', verifyToken, requireAdmin, workoutController.getAllWorkouts);
+router.post('/', verifyToken, requireAdmin, workoutController.createWorkout);
+router.put('/:id', verifyToken, requireAdmin, workoutController.updateWorkout);
+router.patch('/:id/status', verifyToken, requireAdmin, workoutController.toggleWorkoutStatus);
+router.delete('/:id', verifyToken, requireAdmin, workoutController.deleteWorkout);
 
 module.exports = router;
+
