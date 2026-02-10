@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const SPECIALIZATIONS = ['weight-loss', 'muscle-gain', 'cardio', 'yoga', 'crossfit', 'powerlifting', 'rehabilitation', 'sports-specific'];
 
 const AvailabilitySchema = new mongoose.Schema({
-  dayOfWeek: { type: String, enum: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'], required: true },
+  dayOfWeek: { type: String, enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'], required: true },
   startTime: { type: String, trim: true },
   endTime: { type: String, trim: true },
   isAvailable: { type: Boolean, default: true }
@@ -34,6 +34,7 @@ const instructorSchema = new mongoose.Schema({
   bio: { type: String, maxlength: 1000, trim: true },
   stats: { type: StatsSchema, default: () => ({}) },
   isAvailable: { type: Boolean, default: true },
+  acceptingMembers: { type: Boolean, default: true },
   beforePhoto: {
     type: mongoose.Schema.Types.Mixed, // Mixed type to support Cloudinary object format { secure_url, public_id }
     default: null

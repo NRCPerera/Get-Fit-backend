@@ -122,6 +122,7 @@ const getAllInstructors = async (req, res, next) => {
           experience: instructor.experience || 0,
           monthlyRate: instructor.monthlyRate || 0,
           isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
+          acceptingMembers: instructor.acceptingMembers !== undefined ? instructor.acceptingMembers : true,
           userId: instructor.userId?.toString(),
           user: userData,
           beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
@@ -278,6 +279,7 @@ const getInstructorById = async (req, res, next) => {
       monthlyRate: instructor.monthlyRate || 0,
       certifications: instructor.certifications || [],
       isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
+      acceptingMembers: instructor.acceptingMembers !== undefined ? instructor.acceptingMembers : true,
       userId: instructor.userId?.toString(),
       user: user,
       beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
@@ -378,6 +380,7 @@ const getMyProfile = async (req, res, next) => {
       bio: instructor.bio || null,
       availability: instructor.availability || [],
       isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
+      acceptingMembers: instructor.acceptingMembers !== undefined ? instructor.acceptingMembers : true,
       stats: instructor.stats || {
         totalClients: 0,
         totalSessions: 0,
@@ -790,6 +793,258 @@ const deleteBeforeAfterPhoto = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// ALLOCATION FUNCTIONS (Free member-instructor pairing)
+// ==========================================
+
+/**
+ * Member allocates themselves to an instructor (free, no payment)
+ */
+const allocateToInstructor = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+    const { instructorId } = req.body;
+
+    if (!instructorId) {
+      return next(new ApiError('Instructor ID is required', 400));
+    }
+
+    // Check if instructor exists
+    const instructor = await Instructor.findOne({ userId: instructorId });
+    if (!instructor) {
+      return next(new ApiError('Instructor not found', 404));
+    }
+
+    // Check if instructor is accepting new members
+    if (!instructor.acceptingMembers) {
+      return next(new ApiError('This instructor is not accepting new members at the moment', 400));
+    }
+
+    // Check if already allocated
+    const existing = await Allocation.findOne({
+      memberId: req.user.id,
+      instructorId: instructorId,
+      status: 'active'
+    });
+
+    if (existing) {
+      return next(new ApiError('You are already allocated to this instructor', 400));
+    }
+
+    // Check if there's a cancelled allocation, reactivate it
+    const cancelled = await Allocation.findOne({
+      memberId: req.user.id,
+      instructorId: instructorId,
+      status: 'cancelled'
+    });
+
+    if (cancelled) {
+      cancelled.status = 'active';
+      cancelled.allocatedAt = new Date();
+      cancelled.cancelledAt = null;
+      cancelled.cancelledBy = null;
+      await cancelled.save();
+
+      return res.json({
+        success: true,
+        message: 'Successfully allocated to instructor',
+        data: { allocation: cancelled }
+      });
+    }
+
+    // Create new allocation
+    const allocation = await Allocation.create({
+      memberId: req.user.id,
+      instructorId: instructorId,
+      status: 'active'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Successfully allocated to instructor',
+      data: { allocation }
+    });
+  } catch (err) {
+    console.error('Error allocating to instructor:', err);
+    next(err);
+  }
+};
+
+/**
+ * Member removes their allocation from an instructor
+ */
+const deallocateFromInstructor = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+    const { instructorId } = req.params;
+
+    const allocation = await Allocation.findOne({
+      memberId: req.user.id,
+      instructorId: instructorId,
+      status: 'active'
+    });
+
+    if (!allocation) {
+      return next(new ApiError('Allocation not found', 404));
+    }
+
+    allocation.status = 'cancelled';
+    allocation.cancelledAt = new Date();
+    allocation.cancelledBy = 'member';
+    await allocation.save();
+
+    res.json({
+      success: true,
+      message: 'Successfully deallocated from instructor',
+      data: { allocation }
+    });
+  } catch (err) {
+    console.error('Error deallocating from instructor:', err);
+    next(err);
+  }
+};
+
+/**
+ * Member checks their allocation status with an instructor
+ */
+const checkAllocationStatus = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+    const { instructorId } = req.params;
+
+    const allocation = await Allocation.findOne({
+      memberId: req.user.id,
+      instructorId: instructorId,
+      status: 'active'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        isAllocated: !!allocation,
+        allocation: allocation || null
+      }
+    });
+  } catch (err) {
+    console.error('Error checking allocation status:', err);
+    next(err);
+  }
+};
+
+/**
+ * Instructor views their allocated members (separate from subscribed clients)
+ */
+const getMyAllocatedMembers = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+
+    // Get instructor profile to verify
+    const instructor = await Instructor.findOne({ userId: req.user.id });
+    if (!instructor) {
+      return next(new ApiError('Instructor profile not found', 404));
+    }
+
+    // Get all active allocations for this instructor
+    const allocations = await Allocation.find({
+      instructorId: req.user.id,
+      status: 'active'
+    })
+      .populate('memberId', 'name email phone profilePicture')
+      .sort({ allocatedAt: -1 })
+      .lean();
+
+    // Transform to member format
+    const members = allocations
+      .filter(alloc => alloc.memberId != null)
+      .map(alloc => {
+        const member = alloc.memberId;
+        return {
+          _id: member._id,
+          name: member.name,
+          email: member.email,
+          phone: member.phone,
+          profilePicture: member.profilePicture,
+          allocatedAt: alloc.allocatedAt,
+          allocationId: alloc._id
+        };
+      });
+
+    res.json({
+      success: true,
+      data: { members, acceptingMembers: instructor.acceptingMembers }
+    });
+  } catch (err) {
+    console.error('Error getting allocated members:', err);
+    next(err);
+  }
+};
+
+/**
+ * Instructor removes an allocated member
+ */
+const removeAllocatedMember = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+    const { memberId } = req.params;
+
+    const allocation = await Allocation.findOne({
+      instructorId: req.user.id,
+      memberId: memberId,
+      status: 'active'
+    });
+
+    if (!allocation) {
+      return next(new ApiError('Allocation not found', 404));
+    }
+
+    allocation.status = 'cancelled';
+    allocation.cancelledAt = new Date();
+    allocation.cancelledBy = 'instructor';
+    await allocation.save();
+
+    res.json({
+      success: true,
+      message: 'Member allocation cancelled',
+      data: { allocation }
+    });
+  } catch (err) {
+    console.error('Error removing allocated member:', err);
+    next(err);
+  }
+};
+
+/**
+ * Instructor toggles whether they accept new member allocations
+ */
+const toggleAcceptingMembers = async (req, res, next) => {
+  try {
+    const { acceptingMembers } = req.body;
+
+    if (typeof acceptingMembers !== 'boolean') {
+      return next(new ApiError('acceptingMembers must be a boolean value', 400));
+    }
+
+    const instructor = await Instructor.findOneAndUpdate(
+      { userId: req.user.id },
+      { acceptingMembers },
+      { new: true }
+    );
+
+    if (!instructor) {
+      return next(new ApiError('Instructor not found', 404));
+    }
+
+    res.json({
+      success: true,
+      message: acceptingMembers ? 'Now accepting new members' : 'Stopped accepting new members',
+      data: { acceptingMembers: instructor.acceptingMembers }
+    });
+  } catch (err) {
+    console.error('Error toggling accepting members:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getAllInstructors,
   getInstructorById,
@@ -803,5 +1058,12 @@ module.exports = {
   unsubscribeFromInstructor,
   checkSubscriptionStatus,
   uploadBeforeAfterPhoto,
-  deleteBeforeAfterPhoto
+  deleteBeforeAfterPhoto,
+  // Allocation functions
+  allocateToInstructor,
+  deallocateFromInstructor,
+  checkAllocationStatus,
+  getMyAllocatedMembers,
+  removeAllocatedMember,
+  toggleAcceptingMembers
 };
