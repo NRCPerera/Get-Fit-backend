@@ -21,18 +21,21 @@ router.get('/me/allocated-members', verifyToken, requireInstructor, getMyAllocat
 router.post('/me/toggle-accepting-members', verifyToken, requireInstructor, toggleAcceptingMembers);
 router.delete('/me/allocated-members/:memberId', verifyToken, requireInstructor, removeAllocatedMember);
 
-router.get('/:id', optionalAuth, getInstructorById);
-router.post('/apply', verifyToken, becomeInstructor);
-
 // Subscription routes (paid personal training)
 const { requireMember } = require('../middlewares/role.middleware');
 router.post('/subscribe', verifyToken, requireMember, subscribeToInstructor);
-router.post('/:instructorId/unsubscribe', verifyToken, requireMember, unsubscribeFromInstructor);
-router.get('/:instructorId/subscription-status', verifyToken, requireMember, checkSubscriptionStatus);
 
 // Allocation routes (free member self-allocation)
 router.get('/my-allocation', verifyToken, requireMember, getMyCurrentAllocation);
 router.post('/allocate', verifyToken, requireMember, allocateToInstructor);
+
+// This must come AFTER all static routes to avoid matching them as :id
+router.get('/:id', optionalAuth, getInstructorById);
+router.post('/apply', verifyToken, becomeInstructor);
+
+// Routes with :instructorId param
+router.post('/:instructorId/unsubscribe', verifyToken, requireMember, unsubscribeFromInstructor);
+router.get('/:instructorId/subscription-status', verifyToken, requireMember, checkSubscriptionStatus);
 router.post('/:instructorId/deallocate', verifyToken, requireMember, deallocateFromInstructor);
 router.get('/:instructorId/allocation-status', verifyToken, requireMember, checkAllocationStatus);
 
