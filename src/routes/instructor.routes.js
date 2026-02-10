@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken, optionalAuth } = require('../middlewares/auth.middleware');
 const { requireInstructor, requireAdmin } = require('../middlewares/role.middleware');
-const { getAllInstructors, getInstructorById, updateInstructorProfile, getMyProfile, getInstructorStats, getMyClients, updateAvailability, becomeInstructor, subscribeToInstructor, unsubscribeFromInstructor, checkSubscriptionStatus, uploadBeforeAfterPhoto, deleteBeforeAfterPhoto, allocateToInstructor, deallocateFromInstructor, checkAllocationStatus, getMyAllocatedMembers, removeAllocatedMember, toggleAcceptingMembers } = require('../controllers/instructor.controller');
+const { getAllInstructors, getInstructorById, updateInstructorProfile, getMyProfile, getInstructorStats, getMyClients, updateAvailability, becomeInstructor, subscribeToInstructor, unsubscribeFromInstructor, checkSubscriptionStatus, uploadBeforeAfterPhoto, deleteBeforeAfterPhoto, allocateToInstructor, deallocateFromInstructor, checkAllocationStatus, getMyCurrentAllocation, getMyAllocatedMembers, removeAllocatedMember, toggleAcceptingMembers } = require('../controllers/instructor.controller');
 const { getClientMeasurements } = require('../controllers/measurement.controller');
 const { uploadImage } = require('../middlewares/upload.middleware');
 
@@ -31,6 +31,7 @@ router.post('/:instructorId/unsubscribe', verifyToken, requireMember, unsubscrib
 router.get('/:instructorId/subscription-status', verifyToken, requireMember, checkSubscriptionStatus);
 
 // Allocation routes (free member self-allocation)
+router.get('/my-allocation', verifyToken, requireMember, getMyCurrentAllocation);
 router.post('/allocate', verifyToken, requireMember, allocateToInstructor);
 router.post('/:instructorId/deallocate', verifyToken, requireMember, deallocateFromInstructor);
 router.get('/:instructorId/allocation-status', verifyToken, requireMember, checkAllocationStatus);

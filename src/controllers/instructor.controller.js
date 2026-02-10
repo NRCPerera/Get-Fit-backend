@@ -799,10 +799,13 @@ const deleteBeforeAfterPhoto = async (req, res, next) => {
 
 /**
  * Member allocates themselves to an instructor (free, no payment)
+ * A member can only be allocated to ONE instructor at a time.
+ * Personal training subscriptions are independent and unaffected.
  */
 const allocateToInstructor = async (req, res, next) => {
   try {
     const Allocation = require('../models/Allocation');
+    const User = require('../models/User');
     const { instructorId } = req.body;
 
     if (!instructorId) {
@@ -820,18 +823,38 @@ const allocateToInstructor = async (req, res, next) => {
       return next(new ApiError('This instructor is not accepting new members at the moment', 400));
     }
 
-    // Check if already allocated
-    const existing = await Allocation.findOne({
+    // Check if already allocated to THIS instructor
+    const existingSame = await Allocation.findOne({
       memberId: req.user.id,
       instructorId: instructorId,
       status: 'active'
     });
 
-    if (existing) {
+    if (existingSame) {
       return next(new ApiError('You are already allocated to this instructor', 400));
     }
 
-    // Check if there's a cancelled allocation, reactivate it
+    // Check if already allocated to ANY other instructor (one allocation per member rule)
+    const existingOther = await Allocation.findOne({
+      memberId: req.user.id,
+      status: 'active'
+    }).populate('instructorId', 'name');
+
+    if (existingOther) {
+      // Get the other instructor's name for a helpful error message
+      let otherInstructorName = 'another instructor';
+      try {
+        const otherUser = await User.findById(existingOther.instructorId).select('name');
+        if (otherUser) otherInstructorName = otherUser.name;
+      } catch (e) { /* ignore */ }
+
+      return next(new ApiError(
+        `You are already allocated to ${otherInstructorName}. Please remove your current allocation before choosing a new instructor.`,
+        400
+      ));
+    }
+
+    // Check if there's a cancelled allocation to this instructor, reactivate it
     const cancelled = await Allocation.findOne({
       memberId: req.user.id,
       instructorId: instructorId,
@@ -1045,6 +1068,63 @@ const toggleAcceptingMembers = async (req, res, next) => {
   }
 };
 
+/**
+ * Member checks their current active allocation (to any instructor).
+ * Returns the current allocation with instructor details, or null if not allocated.
+ */
+const getMyCurrentAllocation = async (req, res, next) => {
+  try {
+    const Allocation = require('../models/Allocation');
+    const User = require('../models/User');
+
+    const allocation = await Allocation.findOne({
+      memberId: req.user.id,
+      status: 'active'
+    });
+
+    if (!allocation) {
+      return res.json({
+        success: true,
+        data: {
+          hasAllocation: false,
+          allocation: null,
+          instructor: null
+        }
+      });
+    }
+
+    // Get instructor details
+    let instructorInfo = null;
+    try {
+      const instructor = await Instructor.findOne({ userId: allocation.instructorId });
+      const user = await User.findById(allocation.instructorId).select('name email profilePicture');
+      if (instructor && user) {
+        instructorInfo = {
+          _id: instructor._id,
+          userId: allocation.instructorId,
+          name: user.name,
+          email: user.email,
+          profilePicture: user.profilePicture,
+          specializations: instructor.specializations,
+          specialty: instructor.specializations?.[0] || null
+        };
+      }
+    } catch (e) { /* ignore */ }
+
+    res.json({
+      success: true,
+      data: {
+        hasAllocation: true,
+        allocation,
+        instructor: instructorInfo
+      }
+    });
+  } catch (err) {
+    console.error('Error getting current allocation:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getAllInstructors,
   getInstructorById,
@@ -1063,6 +1143,7 @@ module.exports = {
   allocateToInstructor,
   deallocateFromInstructor,
   checkAllocationStatus,
+  getMyCurrentAllocation,
   getMyAllocatedMembers,
   removeAllocatedMember,
   toggleAcceptingMembers
