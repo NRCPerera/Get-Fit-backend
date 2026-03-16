@@ -13,7 +13,7 @@ const config = {
   JWT_SECRET: process.env.JWT_SECRET,
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
   JWT_EXPIRE: process.env.JWT_EXPIRE || '15m',
-  JWT_REFRESH_EXPIRE: process.env.JWT_REFRESH_EXPIRE || '7d',
+  JWT_REFRESH_EXPIRE: process.env.JWT_REFRESH_EXPIRE || '30d',
 
   // PayHere configuration
   PAYHERE_MERCHANT_ID: process.env.PAYHERE_MERCHANT_ID,

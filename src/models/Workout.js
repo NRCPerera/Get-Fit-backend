@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
-const SCHEDULE_TYPES = ['1-day', '2-day', '3-day'];
+const SCHEDULE_TYPES = ['1-day', '2-day', '3-day', '4-day', '5-day', '6-day', '7-day'];
 
 const exerciseSetRepSchema = new mongoose.Schema({
     sets: { type: String, required: true },
@@ -14,7 +14,7 @@ const workoutExerciseSchema = new mongoose.Schema({
     setReps: [exerciseSetRepSchema],
     duration: { type: Number, min: 0 },
     restTime: { type: Number, min: 0, default: 60 },
-    scheduleDay: { type: Number, min: 1, max: 3, default: 1 },
+    scheduleDay: { type: Number, min: 1, max: 7, default: 1 },
     notes: { type: String, trim: true }
 }, { _id: false });
 
