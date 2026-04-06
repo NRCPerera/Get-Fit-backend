@@ -36,6 +36,7 @@ const getAllWorkouts = async (req, res, next) => {
 
         const [workouts, total] = await Promise.all([
             Workout.find(filter)
+                .populate({ path: 'exercises.exerciseId', model: 'Exercise' })
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(parseInt(limit))
@@ -72,6 +73,7 @@ const getPublicWorkouts = async (req, res, next) => {
         }
 
         const workouts = await Workout.find(filter)
+            .populate({ path: 'exercises.exerciseId', model: 'Exercise' })
             .sort({ createdAt: -1 })
             .lean();
 
@@ -100,7 +102,9 @@ const getPublicWorkouts = async (req, res, next) => {
  */
 const getWorkoutById = async (req, res, next) => {
     try {
-        const workout = await Workout.findById(req.params.id).lean();
+        const workout = await Workout.findById(req.params.id)
+            .populate({ path: 'exercises.exerciseId', model: 'Exercise' })
+            .lean();
 
         if (!workout) {
             return next(new ApiError(404, 'Workout not found'));
