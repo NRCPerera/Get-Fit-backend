@@ -1,6 +1,6 @@
 const express = require('express');
 const { body } = require('express-validator');
-const { register, login, logout, refreshToken, forgotPassword, resetPassword, verifyEmail, verifyOTP, resendOTP, getMe } = require('../controllers/auth.controller');
+const { register, login, logout, refreshToken, forgotPassword, resetPassword, verifyPasswordResetOTP, verifyEmail, verifyOTP, resendOTP, getMe } = require('../controllers/auth.controller');
 const { verifyToken } = require('../middlewares/auth.middleware');
 const { validateRequest } = require('../middlewares/validation.middleware');
 const { authLimiter } = require('../middlewares/rateLimit.middleware');
@@ -89,6 +89,7 @@ router.post('/login', authLimiter, validateRequest(loginValidator), login);
 router.post('/logout', verifyToken, logout);
 router.post('/refresh-token', validateRequest(refreshTokenValidation), refreshToken);
 router.post('/forgot-password', authLimiter, validateRequest(forgotPasswordValidation), forgotPassword);
+router.post('/verify-password-reset-otp', authLimiter, validateRequest(verifyOTPValidation), verifyPasswordResetOTP);
 router.post('/reset-password', authLimiter, validateRequest(resetPasswordValidator), resetPassword);
 router.get('/verify-email/:token', verifyEmail);
 router.post('/verify-otp', authLimiter, validateRequest(verifyOTPValidation), verifyOTP);

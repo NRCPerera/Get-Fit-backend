@@ -280,6 +280,45 @@ const resetPassword = async (req, res, next) => {
 };
 
 /**
+ * Verify password reset OTP without consuming it
+ */
+const verifyPasswordResetOTP = async (req, res, next) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return next(new ApiError('Email and OTP are required', 400));
+    }
+
+    const user = await User.findOne({ email }).select('+passwordResetOTP +passwordResetOTPExpires');
+
+    if (!user) {
+      return next(new ApiError('User not found', 404));
+    }
+
+    if (!user.passwordResetOTP) {
+      return next(new ApiError('No OTP found. Please request a new password reset.', 400));
+    }
+
+    if (user.passwordResetOTP !== otp) {
+      return next(new ApiError('Invalid OTP code', 400));
+    }
+
+    if (user.passwordResetOTPExpires < Date.now()) {
+      return next(new ApiError('OTP has expired. Please request a new password reset.', 400));
+    }
+
+    res.json({
+      success: true,
+      message: 'OTP verified successfully',
+    });
+  } catch (error) {
+    logger.error('Verify password reset OTP error:', error);
+    next(error);
+  }
+};
+
+/**
  * Verify email
  */
 const verifyEmail = async (req, res, next) => {
@@ -500,6 +539,7 @@ module.exports = {
   refreshToken,
   forgotPassword,
   resetPassword,
+  verifyPasswordResetOTP,
   verifyEmail,
   verifyOTP,
   resendOTP,
