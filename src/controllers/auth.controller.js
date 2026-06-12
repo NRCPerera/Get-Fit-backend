@@ -309,18 +309,10 @@ const verifyEmail = async (req, res, next) => {
       throw jwtError;
     }
 
-    // Find user with verification token
-    const user = await User.findOne({
-      _id: decoded.id
-    }).select('+emailVerificationToken');
+    const user = await User.findById(decoded.id);
 
     if (!user) {
       return next(new ApiError('User not found', 404));
-    }
-
-    // Check if token matches
-    if (user.emailVerificationToken !== token) {
-      return next(new ApiError('Invalid verification token', 400));
     }
 
     // Check if already verified
@@ -336,7 +328,6 @@ const verifyEmail = async (req, res, next) => {
 
     // Update user - set isEmailVerified to true
     user.isEmailVerified = true;
-    user.emailVerificationToken = undefined;
     await user.save();
 
     logger.info(`Email verified successfully for user: ${user.email}`);

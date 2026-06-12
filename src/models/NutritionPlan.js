@@ -4,14 +4,14 @@ const FOOD_NUTRIENTS = {
   calories: { type: Number, min: 0, default: 0 },
   protein: { type: Number, min: 0, default: 0 },
   carbs: { type: Number, min: 0, default: 0 },
-  fats: { type: Number, min: 0, default: 0 }
+  fats: { type: Number, min: 0, default: 0 },
 };
 
 const FoodSchema = new mongoose.Schema({
   name: { type: String, trim: true, required: true },
   quantity: { type: Number, min: 0, default: 0 },
   unit: { type: String, trim: true },
-  ...FOOD_NUTRIENTS
+  ...FOOD_NUTRIENTS,
 }, { _id: false });
 
 const MealSchema = new mongoose.Schema({
@@ -19,12 +19,13 @@ const MealSchema = new mongoose.Schema({
   name: { type: String, trim: true },
   time: { type: String, trim: true },
   foods: [FoodSchema],
-  instructions: { type: String, trim: true }
+  instructions: { type: String, trim: true },
 }, { _id: false });
 
 const nutritionPlanSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   title: { type: String, required: true, trim: true },
   description: { type: String, trim: true },
   meals: [MealSchema],
@@ -36,11 +37,11 @@ const nutritionPlanSchema = new mongoose.Schema({
   startDate: { type: Date },
   endDate: { type: Date },
   notes: { type: String, trim: true },
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  isShared: { type: Boolean, default: false },
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
-// Virtual total calories across all meals/foods
-nutritionPlanSchema.virtual('totalCalories').get(function() {
+nutritionPlanSchema.virtual('totalCalories').get(function () {
   if (!this.meals || this.meals.length === 0) return 0;
   return this.meals.reduce((sumMeals, meal) => {
     const mealCalories = (meal.foods || []).reduce((sumFoods, food) => sumFoods + (food.calories || 0), 0);
@@ -49,5 +50,3 @@ nutritionPlanSchema.virtual('totalCalories').get(function() {
 });
 
 module.exports = mongoose.model('NutritionPlan', nutritionPlanSchema);
-
-

@@ -1,7 +1,8 @@
 const mongoose = require('mongoose');
 
 const PAYMENT_STATUSES = ['pending', 'completed', 'failed', 'refunded'];
-const PAYMENT_METHODS = ['payhere', 'paypal', 'cash', 'mock'];
+const PAYMENT_METHODS = ['payhere', 'cash'];
+const PAYMENT_TYPES = ['membership', 'personal_training'];
 
 const paymentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
@@ -10,13 +11,12 @@ const paymentSchema = new mongoose.Schema({
   currency: { type: String, default: 'LKR', uppercase: true },
   status: { type: String, enum: PAYMENT_STATUSES, default: 'pending', index: true },
   paymentMethod: { type: String, enum: PAYMENT_METHODS },
+  paymentType: { type: String, enum: PAYMENT_TYPES, required: true },
   payhereOrderId: { type: String, trim: true, index: true },
   payherePaymentId: { type: String, trim: true },
   description: { type: String, trim: true },
   metadata: { type: mongoose.Schema.Types.Mixed },
-  transactionDate: { type: Date, default: Date.now }
+  transactionDate: { type: Date, default: Date.now },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Payment', paymentSchema);
-
-

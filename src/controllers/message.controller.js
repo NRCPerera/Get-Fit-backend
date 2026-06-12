@@ -2,8 +2,9 @@ const Message = require('../models/Message');
 const Conversation = require('../models/Conversation');
 const User = require('../models/User');
 const Instructor = require('../models/Instructor');
-const Subscription = require('../models/Subscription');
+const InstructorAssignment = require('../models/InstructorAssignment');
 const ApiError = require('../utils/ApiError');
+const { getMediaUrl } = require('../utils/mediaResponse');
 
 /**
  * Get or create a conversation between current user and another user
@@ -40,13 +41,14 @@ const getOrCreateConversation = async (req, res, next) => {
         }
 
         // Verify subscription exists between member and instructor
-        const subscription = await Subscription.findOne({
-            memberId: memberId,
-            instructorId: instructorId,
-            status: 'active'
+        const assignment = await InstructorAssignment.findOne({
+            memberId,
+            instructorId,
+            status: 'active',
+            type: 'paid',
         });
 
-        if (!subscription) {
+        if (!assignment) {
             return next(new ApiError('You can only message instructors you are subscribed to', 403));
         }
 
@@ -77,7 +79,7 @@ const getOrCreateConversation = async (req, res, next) => {
         let instructorDetails = null;
         if (instructorId) {
             instructorDetails = await Instructor.findOne({ userId: instructorId })
-                .select('specializations rating totalReviews');
+                .select('specializations stats');
         }
 
         // Format participant info
@@ -85,17 +87,7 @@ const getOrCreateConversation = async (req, res, next) => {
             p => p._id.toString() !== currentUserId
         );
 
-        // Get profile picture URL
-        let profilePicture = null;
-        if (otherParticipant?.profilePicture) {
-            if (typeof otherParticipant.profilePicture === 'object' && otherParticipant.profilePicture.secure_url) {
-                profilePicture = otherParticipant.profilePicture.secure_url;
-            } else if (typeof otherParticipant.profilePicture === 'string' &&
-                (otherParticipant.profilePicture.startsWith('http://') ||
-                    otherParticipant.profilePicture.startsWith('https://'))) {
-                profilePicture = otherParticipant.profilePicture;
-            }
-        }
+        const profilePicture = getMediaUrl(otherParticipant?.profilePicture);
 
         res.status(200).json({
             success: true,
@@ -117,8 +109,7 @@ const getOrCreateConversation = async (req, res, next) => {
                     role: otherParticipant.role,
                     ...(instructorDetails && {
                         specializations: instructorDetails.specializations,
-                        rating: instructorDetails.rating,
-                        totalReviews: instructorDetails.totalReviews
+                        rating: instructorDetails.stats?.avgRating || 0,
                     })
                 }
             }
@@ -154,7 +145,7 @@ const getConversations = async (req, res, next) => {
         // Get instructor details for all instructor participants
         const instructorIds = conversations.map(conv => conv.instructor);
         const instructorDetails = await Instructor.find({ userId: { $in: instructorIds } })
-            .select('userId specializations rating');
+            .select('userId specializations stats');
 
         const instructorMap = {};
         instructorDetails.forEach(inst => {
@@ -167,18 +158,7 @@ const getConversations = async (req, res, next) => {
                 p => p._id.toString() !== userId
             );
 
-            // Get profile picture URL
-            let profilePicture = null;
-            if (otherParticipant?.profilePicture) {
-                if (typeof otherParticipant.profilePicture === 'object' && otherParticipant.profilePicture.secure_url) {
-                    profilePicture = otherParticipant.profilePicture.secure_url;
-                } else if (typeof otherParticipant.profilePicture === 'string' &&
-                    (otherParticipant.profilePicture.startsWith('http://') ||
-                        otherParticipant.profilePicture.startsWith('https://'))) {
-                    profilePicture = otherParticipant.profilePicture;
-                }
-            }
-
+            const profilePicture = getMediaUrl(otherParticipant?.profilePicture);
             const instructorInfo = instructorMap[conv.instructor?.toString()];
 
             return {
@@ -191,7 +171,7 @@ const getConversations = async (req, res, next) => {
                     role: otherParticipant?.role,
                     ...(instructorInfo && otherParticipant?.role === 'instructor' && {
                         specializations: instructorInfo.specializations,
-                        rating: instructorInfo.rating
+                        rating: instructorInfo.stats?.avgRating || 0
                     })
                 },
                 lastMessage: conv.lastMessage,
@@ -273,16 +253,7 @@ const getMessages = async (req, res, next) => {
 
         // Format messages with proper profile picture URLs
         const formattedMessages = messages.map(msg => {
-            let profilePicture = null;
-            if (msg.sender?.profilePicture) {
-                if (typeof msg.sender.profilePicture === 'object' && msg.sender.profilePicture.secure_url) {
-                    profilePicture = msg.sender.profilePicture.secure_url;
-                } else if (typeof msg.sender.profilePicture === 'string' &&
-                    (msg.sender.profilePicture.startsWith('http://') ||
-                        msg.sender.profilePicture.startsWith('https://'))) {
-                    profilePicture = msg.sender.profilePicture;
-                }
-            }
+            const profilePicture = getMediaUrl(msg.sender?.profilePicture);
 
             return {
                 _id: msg._id,
@@ -339,13 +310,14 @@ const sendMessage = async (req, res, next) => {
         }
 
         // Verify subscription is still active
-        const subscription = await Subscription.findOne({
+        const assignment = await InstructorAssignment.findOne({
             memberId: conversation.member,
             instructorId: conversation.instructor,
-            status: 'active'
+            status: 'active',
+            type: 'paid',
         });
 
-        if (!subscription) {
+        if (!assignment) {
             return next(new ApiError('Subscription is no longer active. You cannot send messages.', 403));
         }
 
@@ -394,16 +366,7 @@ const sendMessage = async (req, res, next) => {
             console.error('Error sending message notification:', err);
         });
 
-        let profilePicture = null;
-        if (sender?.profilePicture) {
-            if (typeof sender.profilePicture === 'object' && sender.profilePicture.secure_url) {
-                profilePicture = sender.profilePicture.secure_url;
-            } else if (typeof sender.profilePicture === 'string' &&
-                (sender.profilePicture.startsWith('http://') ||
-                    sender.profilePicture.startsWith('https://'))) {
-                profilePicture = sender.profilePicture;
-            }
-        }
+        const profilePicture = getMediaUrl(sender?.profilePicture);
 
         res.status(201).json({
             success: true,

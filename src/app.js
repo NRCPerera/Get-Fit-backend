@@ -217,54 +217,18 @@ app.get('/payment/return', async (req, res) => {
             }
           }
 
-          // Handle subscription activation
           if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
             try {
-              const Subscription = require('./models/Subscription');
-
-              const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
-
-              if (!existingSubscription) {
-                // Calculate expiry date (1 month from now)
-                const subscribedAt = new Date();
-                const expiresAt = new Date(subscribedAt);
-                expiresAt.setMonth(expiresAt.getMonth() + 1);
-
-                const activeSubscription = await Subscription.findOne({
-                  memberId: payment.userId,
-                  instructorId: payment.instructorId,
-                  status: 'active'
-                });
-
-                if (activeSubscription) {
-                  // Extend existing subscription by 1 month from current expiry or now
-                  const baseDate = activeSubscription.expiresAt > new Date()
-                    ? new Date(activeSubscription.expiresAt)
-                    : new Date();
-                  const newExpiresAt = new Date(baseDate);
-                  newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
-
-                  activeSubscription.status = 'active';
-                  activeSubscription.subscribedAt = subscribedAt;
-                  activeSubscription.expiresAt = newExpiresAt;
-                  activeSubscription.cancelledAt = null;
-                  activeSubscription.paymentId = payment._id;
-                  await activeSubscription.save();
-                } else {
-                  await Subscription.create({
-                    memberId: payment.userId,
-                    instructorId: payment.instructorId,
-                    status: 'active',
-                    paymentId: payment._id,
-                    subscribedAt: subscribedAt,
-                    expiresAt: expiresAt
-                  });
-                }
-
-                logger.info(`Subscription created via return URL for payment ${payment._id}, expires: ${expiresAt}`);
-              }
-            } catch (subscriptionError) {
-              logger.error(`Failed to create subscription via return URL:`, subscriptionError);
+              const { activatePaidAssignment } = require('./services/instructorAssignment.service');
+              await activatePaidAssignment({
+                memberId: payment.userId,
+                instructorId: payment.instructorId,
+                paymentId: payment._id,
+                amount: payment.amount,
+              });
+              logger.info(`Instructor assignment created via return URL for payment ${payment._id}`);
+            } catch (assignmentError) {
+              logger.error('Failed to create instructor assignment via return URL:', assignmentError);
             }
           }
         }

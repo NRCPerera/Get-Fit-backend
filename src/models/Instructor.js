@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { cloudinaryAssetSchema, defaultCloudinaryAsset } = require('./schemas/cloudinaryAsset.schema');
 
 const SPECIALIZATIONS = ['weight-loss', 'muscle-gain', 'cardio', 'yoga', 'crossfit', 'powerlifting', 'rehabilitation', 'sports-specific'];
 
@@ -6,7 +7,7 @@ const AvailabilitySchema = new mongoose.Schema({
   dayOfWeek: { type: String, enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'], required: true },
   startTime: { type: String, trim: true },
   endTime: { type: String, trim: true },
-  isAvailable: { type: Boolean, default: true }
+  isAvailable: { type: Boolean, default: true },
 }, { _id: false });
 
 const CertificationSchema = new mongoose.Schema({
@@ -14,14 +15,15 @@ const CertificationSchema = new mongoose.Schema({
   issuedBy: { type: String, trim: true },
   issueDate: { type: Date },
   expiryDate: { type: Date },
-  certificateUrl: { type: String, trim: true }
+  certificateUrl: { type: String, trim: true },
 }, { _id: false });
 
 const StatsSchema = new mongoose.Schema({
   totalClients: { type: Number, default: 0 },
   totalSessions: { type: Number, default: 0 },
   avgRating: { type: Number, default: 0 },
-  totalEarnings: { type: Number, default: 0 }
+  totalReviews: { type: Number, default: 0 },
+  totalEarnings: { type: Number, default: 0 },
 }, { _id: false });
 
 const instructorSchema = new mongoose.Schema({
@@ -36,23 +38,20 @@ const instructorSchema = new mongoose.Schema({
   isAvailable: { type: Boolean, default: true },
   acceptingMembers: { type: Boolean, default: true },
   beforePhoto: {
-    type: mongoose.Schema.Types.Mixed, // Mixed type to support Cloudinary object format { secure_url, public_id }
-    default: null
+    type: cloudinaryAssetSchema,
+    default: defaultCloudinaryAsset,
   },
   afterPhoto: {
-    type: mongoose.Schema.Types.Mixed, // Mixed type to support Cloudinary object format { secure_url, public_id }
-    default: null
-  }
+    type: cloudinaryAssetSchema,
+    default: defaultCloudinaryAsset,
+  },
 }, { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } });
 
-// Virtual populate of user details
 instructorSchema.virtual('user', {
   ref: 'User',
   localField: 'userId',
   foreignField: '_id',
-  justOne: true
+  justOne: true,
 });
 
 module.exports = mongoose.model('Instructor', instructorSchema);
-
-

@@ -1,7 +1,7 @@
 const ApiError = require('../utils/ApiError');
 const Payment = require('../models/Payment');
-const SavedCard = require('../models/SavedCard');
 const config = require('../config/environment');
+const { activatePaidAssignment } = require('../services/instructorAssignment.service');
 const payhereService = require('../services/payhere.service');
 const User = require('../models/User');
 const { sendPaymentReceiptEmail } = require('../services/email.service');
@@ -98,9 +98,10 @@ const createPaymentIntent = async (req, res, next) => {
       currency: currency,
       status: 'pending',
       paymentMethod: 'payhere',
+      paymentType: metadata?.type === 'subscription' || instructorId ? 'personal_training' : 'membership',
       payhereOrderId: orderId,
       description: description || 'Payment',
-      metadata: metadata || {}
+      metadata: metadata || {},
     });
 
     // Initialize PayHere payment
@@ -354,45 +355,17 @@ const handlePayHereWebhook = async (req, res, next) => {
         }
       }
 
-      // If this is a subscription payment, create/activate subscription
       if (payment.metadata && payment.metadata.type === 'subscription' && payment.instructorId) {
         try {
-          const Subscription = require('../models/Subscription');
-
-          // Check if subscription already exists for this payment
-          const existingSubscription = await Subscription.findOne({ paymentId: payment._id });
-
-          if (!existingSubscription) {
-            // Check if user already has an active subscription to this instructor
-            const activeSubscription = await Subscription.findOne({
-              memberId: payment.userId,
-              instructorId: payment.instructorId,
-              status: 'active'
-            });
-
-            if (activeSubscription) {
-              // Reactivate existing subscription with new payment
-              activeSubscription.status = 'active';
-              activeSubscription.subscribedAt = new Date();
-              activeSubscription.cancelledAt = null;
-              activeSubscription.paymentId = payment._id;
-              await activeSubscription.save();
-              logger.info(`Subscription reactivated for payment ${payment._id}`);
-            } else {
-              // Create new subscription
-              await Subscription.create({
-                memberId: payment.userId,
-                instructorId: payment.instructorId,
-                status: 'active',
-                paymentId: payment._id,
-                subscribedAt: new Date()
-              });
-              logger.info(`Subscription created for payment ${payment._id}`);
-            }
-          }
-        } catch (subscriptionError) {
-          // Log error but don't fail the webhook
-          logger.error(`Failed to create subscription for payment ${payment._id}:`, subscriptionError);
+          await activatePaidAssignment({
+            memberId: payment.userId,
+            instructorId: payment.instructorId,
+            paymentId: payment._id,
+            amount: payment.amount,
+          });
+          logger.info(`Instructor assignment activated for payment ${payment._id}`);
+        } catch (assignmentError) {
+          logger.error(`Failed to create instructor assignment for payment ${payment._id}:`, assignmentError);
         }
       }
 
@@ -509,12 +482,13 @@ const createSubscriptionPayment = async (req, res, next) => {
       currency: currency,
       status: 'pending',
       paymentMethod: 'payhere',
+      paymentType: 'personal_training',
       payhereOrderId: orderId,
       description: paymentDescription,
       metadata: {
         type: 'subscription',
-        instructorId: instructorId
-      }
+        instructorId: instructorId,
+      },
     });
 
     // Initialize PayHere payment
@@ -594,33 +568,6 @@ const completeSubscriptionPayment = async (req, res, next) => {
   }
 };
 
-// PayHere doesn't support saved cards in the same way as Stripe
-// We'll disable card saving functionality or implement a different approach
-const saveCard = async (req, res, next) => {
-  return next(new ApiError('Card saving is not available with PayHere. Please use PayHere payment page for each transaction.', 400));
-};
-
-const getSavedCards = async (req, res, next) => {
-  res.json({
-    success: true,
-    data: { cards: [] },
-    message: 'Card saving is not available with PayHere'
-  });
-};
-
-const deleteSavedCard = async (req, res, next) => {
-  return next(new ApiError('Card saving is not available with PayHere', 400));
-};
-
-const setDefaultCard = async (req, res, next) => {
-  return next(new ApiError('Card saving is not available with PayHere', 400));
-};
-
-// Create subscription payment with saved card (not supported by PayHere)
-const createSubscriptionPaymentWithSavedCard = async (req, res, next) => {
-  return next(new ApiError('Saved card payments are not available with PayHere. Please use the regular payment flow.', 400));
-};
-
 /**
  * Check payment status - called by frontend to poll payment status
  * This function ONLY checks and returns the current payment status.
@@ -697,10 +644,5 @@ module.exports = {
   refundPayment,
   createSubscriptionPayment,
   completeSubscriptionPayment,
-  saveCard,
-  getSavedCards,
-  deleteSavedCard,
-  setDefaultCard,
-  createSubscriptionPaymentWithSavedCard,
-  markPaymentComplete
+  markPaymentComplete,
 };

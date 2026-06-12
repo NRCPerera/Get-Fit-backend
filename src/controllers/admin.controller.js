@@ -4,7 +4,8 @@ const Payment = require('../models/Payment');
 const Exercise = require('../models/Exercise');
 const Instructor = require('../models/Instructor');
 const TrainingSchedule = require('../models/TrainingSchedule');
-const Subscription = require('../models/Subscription');
+const InstructorAssignment = require('../models/InstructorAssignment');
+const { createFreeAssignment } = require('../services/instructorAssignment.service');
 
 const getDashboardStats = async (req, res, next) => {
   try {
@@ -224,23 +225,22 @@ const getAllUsers = async (req, res, next) => {
     // Get all member IDs from the fetched users
     const memberIds = users.filter(u => u.role === 'member').map(u => u._id);
 
-    // Fetch active subscriptions for these members
-    const subscriptions = await Subscription.find({
+    const assignments = await InstructorAssignment.find({
       memberId: { $in: memberIds },
-      status: 'active'
+      status: 'active',
     })
       .populate('instructorId', 'name email')
       .lean();
 
-    // Create a map of memberId to subscription info
-    const subscriptionMap = {};
-    subscriptions.forEach(sub => {
-      subscriptionMap[sub.memberId.toString()] = {
+    const assignmentMap = {};
+    assignments.forEach((assignment) => {
+      assignmentMap[assignment.memberId.toString()] = {
         isAllocated: true,
-        instructorId: sub.instructorId?._id,
-        instructorName: sub.instructorId?.name || 'Unknown',
-        expiresAt: sub.expiresAt,
-        source: sub.paymentId ? 'subscribed' : 'allocated'
+        instructorId: assignment.instructorId?._id,
+        instructorName: assignment.instructorId?.name || 'Unknown',
+        expiresAt: assignment.endDate,
+        source: assignment.type === 'paid' ? 'subscribed' : 'allocated',
+        type: assignment.type,
       };
     });
 
@@ -254,7 +254,7 @@ const getAllUsers = async (req, res, next) => {
           new: newThisMonth
         },
         users: users.map(user => {
-          const allocation = subscriptionMap[user._id.toString()];
+          const allocation = assignmentMap[user._id.toString()];
           return {
             id: user._id,
             name: user.name,
@@ -636,7 +636,7 @@ const getAnalytics = async (req, res, next) => {
   }
 };
 
-const getAllSubscriptions = async (req, res, next) => {
+const getAllInstructorAssignments = async (req, res, next) => {
   try {
     const { status, limit = 50, page = 1 } = req.query;
     const filter = {};
@@ -647,55 +647,56 @@ const getAllSubscriptions = async (req, res, next) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Get subscription stats
     const [
       totalCount,
       activeCount,
       expiredCount,
       cancelledCount,
-      subscriptions
+      assignments,
+      filteredTotal,
     ] = await Promise.all([
-      Subscription.countDocuments({}),
-      Subscription.countDocuments({ status: 'active' }),
-      Subscription.countDocuments({ status: 'expired' }),
-      Subscription.countDocuments({ status: 'cancelled' }),
-      Subscription.find(filter)
+      InstructorAssignment.countDocuments({}),
+      InstructorAssignment.countDocuments({ status: 'active' }),
+      InstructorAssignment.countDocuments({ status: 'expired' }),
+      InstructorAssignment.countDocuments({ status: 'cancelled' }),
+      InstructorAssignment.find(filter)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
         .populate('memberId', 'name email phone profilePicture')
         .populate('instructorId', 'name email profilePicture')
         .populate('paymentId', 'amount status createdAt')
-        .lean()
+        .lean(),
+      InstructorAssignment.countDocuments(filter),
     ]);
 
-    // Transform subscriptions for frontend
-    const transformedSubscriptions = subscriptions.map(sub => ({
-      _id: sub._id,
-      member: sub.memberId ? {
-        _id: sub.memberId._id,
-        name: sub.memberId.name,
-        email: sub.memberId.email,
-        phone: sub.memberId.phone
+    const transformedAssignments = assignments.map((assignment) => ({
+      _id: assignment._id,
+      member: assignment.memberId ? {
+        _id: assignment.memberId._id,
+        name: assignment.memberId.name,
+        email: assignment.memberId.email,
+        phone: assignment.memberId.phone,
       } : null,
-      instructor: sub.instructorId ? {
-        _id: sub.instructorId._id,
-        name: sub.instructorId.name,
-        email: sub.instructorId.email
+      instructor: assignment.instructorId ? {
+        _id: assignment.instructorId._id,
+        name: assignment.instructorId.name,
+        email: assignment.instructorId.email,
       } : null,
-      status: sub.status,
-      subscribedAt: sub.subscribedAt,
-      expiresAt: sub.expiresAt,
-      cancelledAt: sub.cancelledAt,
-      // Determine source: 'allocated' (no payment) or 'subscribed' (with payment)
-      source: sub.paymentId ? 'subscribed' : 'allocated',
-      payment: sub.paymentId ? {
-        _id: sub.paymentId._id,
-        amount: sub.paymentId.amount,
-        status: sub.paymentId.status,
-        date: sub.paymentId.createdAt
+      type: assignment.type,
+      status: assignment.status,
+      startDate: assignment.startDate,
+      endDate: assignment.endDate,
+      cancelledAt: assignment.cancelledAt,
+      cancelledBy: assignment.cancelledBy,
+      source: assignment.type === 'paid' ? 'subscribed' : 'allocated',
+      payment: assignment.paymentId ? {
+        _id: assignment.paymentId._id,
+        amount: assignment.paymentId.amount,
+        status: assignment.paymentId.status,
+        date: assignment.paymentId.createdAt,
       } : null,
-      createdAt: sub.createdAt
+      createdAt: assignment.createdAt,
     }));
 
     res.json({
@@ -705,16 +706,17 @@ const getAllSubscriptions = async (req, res, next) => {
           total: totalCount,
           active: activeCount,
           expired: expiredCount,
-          cancelled: cancelledCount
+          cancelled: cancelledCount,
         },
-        subscriptions: transformedSubscriptions,
+        assignments: transformedAssignments,
+        subscriptions: transformedAssignments,
         pagination: {
-          total: await Subscription.countDocuments(filter),
+          total: filteredTotal,
           page: parseInt(page),
           limit: parseInt(limit),
-          pages: Math.ceil(await Subscription.countDocuments(filter) / parseInt(limit))
-        }
-      }
+          pages: Math.ceil(filteredTotal / parseInt(limit)),
+        },
+      },
     });
   } catch (err) {
     next(err);
@@ -741,30 +743,22 @@ const allocateInstructor = async (req, res, next) => {
       return next(new ApiError('Instructor not found', 404));
     }
 
-    // Check if subscription already exists
-    const existingSubscription = await Subscription.findOne({
-      memberId,
-      instructorId,
-      status: 'active'
-    });
-
-    if (existingSubscription) {
-      return next(new ApiError('Active subscription already exists for this member and instructor', 400));
-    }
-
-    // Create subscription
-    const subscription = await Subscription.create({
+    const existingAssignment = await InstructorAssignment.findOne({
       memberId,
       instructorId,
       status: 'active',
-      // No payment ID
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // Default 30 days
     });
+
+    if (existingAssignment) {
+      return next(new ApiError('Active assignment already exists for this member and instructor', 400));
+    }
+
+    const { assignment } = await createFreeAssignment({ memberId, instructorId });
 
     res.status(201).json({
       success: true,
       message: 'Instructor allocated successfully',
-      data: { subscription }
+      data: { assignment },
     });
   } catch (err) {
     next(err);
@@ -783,8 +777,9 @@ module.exports = {
   getAllPayments,
   getAllExercises,
   getAnalytics,
-  getAllSubscriptions,
-  allocateInstructor
+  getAllInstructorAssignments,
+  getAllSubscriptions: getAllInstructorAssignments,
+  allocateInstructor,
 };
 
 

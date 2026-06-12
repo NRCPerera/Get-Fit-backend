@@ -8,7 +8,7 @@ const membershipSchema = new mongoose.Schema({
   planName: { type: String, required: true },
   durationDays: { type: Number, required: true },
   amount: { type: Number, required: true },
-  currency: { type: String, default: 'usd', uppercase: true },
+  currency: { type: String, default: 'LKR', uppercase: true },
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   status: { type: String, enum: MEMBERSHIP_STATUS, default: 'active', index: true },
@@ -17,4 +17,3 @@ const membershipSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('Membership', membershipSchema);
-

@@ -314,23 +314,22 @@ const getClientMeasurements = async (req, res, next) => {
       return next(new ApiError('Client ID is required', 400));
     }
 
-    // Verify that the instructor has an active subscription with this client
-    const Subscription = require('../models/Subscription');
+    const InstructorAssignment = require('../models/InstructorAssignment');
     const Instructor = require('../models/Instructor');
     const instructor = await Instructor.findOne({ userId: req.user.id });
-    
+
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
-    // Check if client is subscribed to this instructor
-    const subscription = await Subscription.findOne({
+    const assignment = await InstructorAssignment.findOne({
       instructorId: req.user.id,
       memberId: clientId,
-      status: 'active'
+      status: 'active',
+      type: 'paid',
     });
 
-    if (!subscription) {
+    if (!assignment) {
       return next(new ApiError('Client not found or not subscribed to you', 404));
     }
 

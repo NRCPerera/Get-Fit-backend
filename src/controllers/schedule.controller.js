@@ -1,6 +1,8 @@
 const ApiError = require('../utils/ApiError');
 const TrainingSchedule = require('../models/TrainingSchedule');
 
+const populateExercises = { path: 'exercises.exerciseId', model: 'Exercise' };
+
 const createSchedule = async (req, res, next) => {
   try {
     const body = { ...req.body, createdBy: req.user.id };
@@ -20,7 +22,7 @@ const getMySchedules = async (req, res, next) => {
 
 const getScheduleById = async (req, res, next) => {
   try {
-    const schedule = await TrainingSchedule.findById(req.params.id);
+    const schedule = await TrainingSchedule.findById(req.params.id).populate(populateExercises);
     if (!schedule) return next(new ApiError('Schedule not found', 404));
     if (!schedule.createdBy.equals(req.user.id) && !schedule.assignedTo?.equals(req.user.id) && req.user.role !== 'admin') {
       return next(new ApiError('Not authorized to view this schedule', 403));
@@ -36,6 +38,7 @@ const updateSchedule = async (req, res, next) => {
     if (!schedule.createdBy.equals(req.user.id)) return next(new ApiError('Only creator can update', 403));
     Object.assign(schedule, req.body);
     await schedule.save();
+    await schedule.populate(populateExercises);
     res.json({ success: true, message: 'Schedule updated', data: { schedule } });
   } catch (err) { next(err); }
 };
@@ -57,6 +60,7 @@ const assignSchedule = async (req, res, next) => {
     if (req.user.role !== 'instructor' && req.user.role !== 'admin') return next(new ApiError('Not authorized', 403));
     schedule.assignedTo = req.body.assignedTo;
     await schedule.save();
+    await schedule.populate(populateExercises);
     res.json({ success: true, message: 'Schedule assigned', data: { schedule } });
   } catch (err) { next(err); }
 };
@@ -87,7 +91,5 @@ module.exports = {
   deleteSchedule,
   assignSchedule,
   shareSchedule,
-  getScheduleTemplates
+  getScheduleTemplates,
 };
-
-

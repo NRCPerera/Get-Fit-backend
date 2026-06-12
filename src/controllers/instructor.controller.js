@@ -1,12 +1,15 @@
 const ApiError = require('../utils/ApiError');
 const Instructor = require('../models/Instructor');
+const InstructorAssignment = require('../models/InstructorAssignment');
+const { getMediaUrl } = require('../utils/mediaResponse');
+const { toCloudinaryUploadResult } = require('../utils/cloudinaryAsset');
+const assignmentService = require('../services/instructorAssignment.service');
 
 const getAllInstructors = async (req, res, next) => {
   try {
     const { page = 1, limit = 20, specialization, minRating, q } = req.query;
     const filter = {};
 
-    // Only filter by isAvailable if explicitly set, otherwise show all instructors
     if (req.query.isAvailable !== undefined) {
       filter.isAvailable = req.query.isAvailable === 'true';
     }
@@ -14,7 +17,6 @@ const getAllInstructors = async (req, res, next) => {
     if (specialization) filter.specializations = specialization;
     if (minRating) filter['stats.avgRating'] = { $gte: Number(minRating) };
 
-    // Handle search query
     if (q) {
       const User = require('../models/User');
       const searchRegex = new RegExp(q, 'i');
@@ -32,7 +34,6 @@ const getAllInstructors = async (req, res, next) => {
         if (userIds.length > 0) {
           filter.userId = { $in: userIds };
         } else {
-          // If no users match, return empty results
           return res.json({
             success: true,
             data: {
@@ -45,76 +46,41 @@ const getAllInstructors = async (req, res, next) => {
         }
       } catch (searchError) {
         console.error('Error searching users:', searchError);
-        // Continue without search filter if user search fails
       }
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Find instructors - DO NOT use populate yet, we'll do it manually
     const items = await Instructor.find(filter)
       .skip(skip)
       .limit(parseInt(limit))
       .sort({ 'stats.avgRating': -1 })
       .lean();
 
-    // Manually fetch user data for all instructors
     const User = require('../models/User');
     const userIds = items.map(i => i.userId).filter(Boolean);
     const users = await User.find({ _id: { $in: userIds } })
       .select('_id name email profilePicture')
       .lean();
 
-    // Create a map for quick lookup
     const userMap = {};
     users.forEach(user => {
       userMap[user._id.toString()] = user;
     });
 
-    // Transform data to match frontend expectations
     const transformedItems = items
       .map(instructor => {
         const userData = userMap[instructor.userId?.toString()];
 
-        // Skip instructors without valid user data
         if (!userData) {
           console.warn(`Instructor ${instructor._id} has no user data for userId: ${instructor.userId}`);
           return null;
         }
 
-        // Helper function to normalize photo URL
-        const normalizePhotoUrl = (photoField) => {
-          if (!photoField) return null;
-          if (typeof photoField === 'object' && photoField.secure_url) {
-            return photoField.secure_url;
-          }
-          if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
-            return null; // Old local path, no longer served
-          }
-          if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
-            return photoField;
-          }
-          return photoField || null;
-        };
-
         return {
           _id: instructor._id?.toString() || instructor._id,
           name: userData.name || 'Instructor',
-          avatarUrl: (() => {
-            // Handle Cloudinary object format
-            if (userData.profilePicture && typeof userData.profilePicture === 'object' && userData.profilePicture.secure_url) {
-              return userData.profilePicture.secure_url;
-            }
-            // Handle old local paths - return null (file no longer exists)
-            if (typeof userData.profilePicture === 'string' && userData.profilePicture.startsWith('/uploads/')) {
-              return null;
-            }
-            // Handle Cloudinary URL string or other valid URLs
-            if (typeof userData.profilePicture === 'string' && (userData.profilePicture.startsWith('http://') || userData.profilePicture.startsWith('https://'))) {
-              return userData.profilePicture;
-            }
-            return userData.profilePicture || null;
-          })(),
+          avatarUrl: getMediaUrl(userData.profilePicture),
           specialty: instructor.specializations?.[0] || 'Fitness',
           specializations: instructor.specializations || [],
           rating: instructor.stats?.avgRating || 0,
@@ -124,14 +90,16 @@ const getAllInstructors = async (req, res, next) => {
           isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
           acceptingMembers: instructor.acceptingMembers !== undefined ? instructor.acceptingMembers : true,
           userId: instructor.userId?.toString(),
-          user: userData,
-          beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
-          afterPhoto: normalizePhotoUrl(instructor.afterPhoto)
+          user: {
+            ...userData,
+            profilePicture: getMediaUrl(userData.profilePicture),
+          },
+          beforePhoto: getMediaUrl(instructor.beforePhoto),
+          afterPhoto: getMediaUrl(instructor.afterPhoto)
         };
       })
-      .filter(Boolean); // Remove null entries
+      .filter(Boolean);
 
-    // Count total documents matching the filter
     const total = await Instructor.countDocuments(filter);
 
     res.json({
@@ -165,8 +133,6 @@ const getInstructorById = async (req, res, next) => {
     let instructor = null;
     const User = require('../models/User');
 
-    // Try multiple search strategies
-    // 1. Try finding by instructor _id (most common case)
     if (mongoose.Types.ObjectId.isValid(id)) {
       try {
         instructor = await Instructor.findById(id).lean();
@@ -179,7 +145,6 @@ const getInstructorById = async (req, res, next) => {
       }
     }
 
-    // 2. If not found, try finding by userId (string match)
     if (!instructor) {
       instructor = await Instructor.findOne({ userId: id }).lean();
 
@@ -188,7 +153,6 @@ const getInstructorById = async (req, res, next) => {
       }
     }
 
-    // 3. If still not found and id is valid ObjectId, try userId as ObjectId
     if (!instructor && mongoose.Types.ObjectId.isValid(id)) {
       try {
         const objectId = new mongoose.Types.ObjectId(id);
@@ -203,7 +167,6 @@ const getInstructorById = async (req, res, next) => {
     }
 
     if (!instructor) {
-      // Log all instructor IDs for debugging
       const allInstructors = await Instructor.find({})
         .select('_id userId')
         .limit(10)
@@ -219,7 +182,6 @@ const getInstructorById = async (req, res, next) => {
       return next(new ApiError(`Instructor not found with ID: ${id}`, 404));
     }
 
-    // Manually fetch the user data
     logger.info(`Fetching user data for userId: ${instructor.userId}`);
 
     const user = await User.findById(instructor.userId)
@@ -233,44 +195,12 @@ const getInstructorById = async (req, res, next) => {
 
     logger.info(`User data fetched successfully: ${user.name} (${user.email})`);
 
-    // Attach user data to instructor
-    instructor.user = user;
-
-    // Helper function to normalize photo URL
-    const normalizePhotoUrl = (photoField) => {
-      if (!photoField) return null;
-      if (typeof photoField === 'object' && photoField.secure_url) {
-        return photoField.secure_url;
-      }
-      if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
-        return null; // Old local path, no longer served
-      }
-      if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
-        return photoField;
-      }
-      return photoField || null;
-    };
-
-    // Transform instructor data to match frontend expectations
     const transformedInstructor = {
+      ...instructor,
       _id: instructor._id?.toString() || instructor._id,
       name: user.name || 'Instructor',
       email: user.email || null,
-      avatarUrl: (() => {
-        // Handle Cloudinary object format
-        if (user.profilePicture && typeof user.profilePicture === 'object' && user.profilePicture.secure_url) {
-          return user.profilePicture.secure_url;
-        }
-        // Handle old local paths - return null (file no longer exists)
-        if (typeof user.profilePicture === 'string' && user.profilePicture.startsWith('/uploads/')) {
-          return null;
-        }
-        // Handle Cloudinary URL string or other valid URLs
-        if (typeof user.profilePicture === 'string' && (user.profilePicture.startsWith('http://') || user.profilePicture.startsWith('https://'))) {
-          return user.profilePicture;
-        }
-        return user.profilePicture || null;
-      })(),
+      avatarUrl: getMediaUrl(user.profilePicture),
       specialty: instructor.specializations?.[0] || 'Fitness',
       specializations: instructor.specializations || [],
       rating: instructor.stats?.avgRating || 0,
@@ -281,11 +211,12 @@ const getInstructorById = async (req, res, next) => {
       isAvailable: instructor.isAvailable !== undefined ? instructor.isAvailable : true,
       acceptingMembers: instructor.acceptingMembers !== undefined ? instructor.acceptingMembers : true,
       userId: instructor.userId?.toString(),
-      user: user,
-      beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
-      afterPhoto: normalizePhotoUrl(instructor.afterPhoto),
-      // Include all other instructor fields
-      ...instructor
+      user: {
+        ...user,
+        profilePicture: getMediaUrl(user.profilePicture),
+      },
+      beforePhoto: getMediaUrl(instructor.beforePhoto),
+      afterPhoto: getMediaUrl(instructor.afterPhoto),
     };
 
     logger.info(`Sending instructor data: ${transformedInstructor.name}, email: ${transformedInstructor.email}`);
@@ -336,42 +267,12 @@ const getMyProfile = async (req, res, next) => {
 
     const user = instructor.user || req.user;
 
-    // Helper function to normalize photo URL
-    const normalizePhotoUrl = (photoField) => {
-      if (!photoField) return null;
-      if (typeof photoField === 'object' && photoField.secure_url) {
-        return photoField.secure_url;
-      }
-      if (typeof photoField === 'string' && photoField.startsWith('/uploads/')) {
-        return null; // Old local path, no longer served
-      }
-      if (typeof photoField === 'string' && (photoField.startsWith('http://') || photoField.startsWith('https://'))) {
-        return photoField;
-      }
-      return photoField || null;
-    };
-
-    // Transform data to match frontend expectations
     const profileData = {
       _id: instructor._id?.toString() || instructor._id,
       name: user.name || 'Instructor',
       email: user.email || null,
       phone: user.phone || null,
-      profilePicture: (() => {
-        // Handle Cloudinary object format
-        if (user.profilePicture && typeof user.profilePicture === 'object' && user.profilePicture.secure_url) {
-          return user.profilePicture.secure_url;
-        }
-        // Handle old local paths - return null (file no longer exists)
-        if (typeof user.profilePicture === 'string' && user.profilePicture.startsWith('/uploads/')) {
-          return null;
-        }
-        // Handle Cloudinary URL string or other valid URLs
-        if (typeof user.profilePicture === 'string' && (user.profilePicture.startsWith('http://') || user.profilePicture.startsWith('https://'))) {
-          return user.profilePicture;
-        }
-        return user.profilePicture || null;
-      })(),
+      profilePicture: getMediaUrl(user.profilePicture),
       specializations: instructor.specializations || [],
       specialty: instructor.specializations?.[0] || 'Fitness',
       experience: instructor.experience || 0,
@@ -388,9 +289,12 @@ const getMyProfile = async (req, res, next) => {
         totalEarnings: 0
       },
       userId: instructor.userId?.toString(),
-      user: user,
-      beforePhoto: normalizePhotoUrl(instructor.beforePhoto),
-      afterPhoto: normalizePhotoUrl(instructor.afterPhoto)
+      user: {
+        ...user.toObject?.() || user,
+        profilePicture: getMediaUrl(user.profilePicture),
+      },
+      beforePhoto: getMediaUrl(instructor.beforePhoto),
+      afterPhoto: getMediaUrl(instructor.afterPhoto)
     };
 
     res.json({
@@ -423,49 +327,35 @@ const getInstructorStats = async (req, res, next) => {
 
 const getMyClients = async (req, res, next) => {
   try {
-    const Subscription = require('../models/Subscription');
-    const Instructor = require('../models/Instructor');
-
-    // Get instructor profile to find userId
     const instructor = await Instructor.findOne({ userId: req.user.id });
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
-    // First, expire any subscriptions that have passed their expiry date
-    const now = new Date();
-    await Subscription.updateMany(
-      {
-        instructorId: req.user.id,
-        status: 'active',
-        expiresAt: { $lte: now }
-      },
-      { $set: { status: 'expired' } }
-    );
+    await assignmentService.expireAssignments({ instructorId: req.user.id });
 
-    // Get all active subscriptions for this instructor
-    const subscriptions = await Subscription.find({
+    const assignments = await InstructorAssignment.find({
       instructorId: req.user.id,
+      type: 'paid',
       status: 'active'
     })
       .populate('memberId', 'name email phone profilePicture')
-      .sort({ subscribedAt: -1 })
+      .sort({ startDate: -1 })
       .lean();
 
-    // Transform to client format, filtering out any subscriptions with deleted members
-    const clients = subscriptions
-      .filter(sub => sub.memberId != null) // Filter out subscriptions where member was deleted
-      .map(sub => {
-        const member = sub.memberId;
+    const clients = assignments
+      .filter(assignment => assignment.memberId != null)
+      .map(assignment => {
+        const member = assignment.memberId;
         return {
           _id: member._id,
           name: member.name,
           email: member.email,
           phone: member.phone,
-          profilePicture: member.profilePicture,
-          subscribedAt: sub.subscribedAt,
-          expiresAt: sub.expiresAt,
-          subscriptionId: sub._id
+          profilePicture: getMediaUrl(member.profilePicture),
+          startDate: assignment.startDate,
+          endDate: assignment.endDate,
+          assignmentId: assignment._id
         };
       });
 
@@ -530,7 +420,6 @@ const becomeInstructor = async (req, res, next) => {
 
 const subscribeToInstructor = async (req, res, next) => {
   try {
-    const Subscription = require('../models/Subscription');
     const Payment = require('../models/Payment');
     const { instructorId, paymentId } = req.body;
 
@@ -542,7 +431,6 @@ const subscribeToInstructor = async (req, res, next) => {
       return next(new ApiError('Payment ID is required. Please complete payment first.', 400));
     }
 
-    // Verify payment exists and is completed
     const payment = await Payment.findOne({
       _id: paymentId,
       userId: req.user.id,
@@ -554,63 +442,31 @@ const subscribeToInstructor = async (req, res, next) => {
       return next(new ApiError('Payment not found or not completed. Please complete payment first.', 400));
     }
 
-    // Check if instructor exists
-    const Instructor = require('../models/Instructor');
     const instructor = await Instructor.findOne({ userId: instructorId });
     if (!instructor) {
       return next(new ApiError('Instructor not found', 404));
     }
 
-    // Calculate subscription dates (1 month from now)
-    const subscribedAt = new Date();
-    const expiresAt = new Date(subscribedAt);
-    expiresAt.setMonth(expiresAt.getMonth() + 1);
-
-    // Check if already subscribed
-    const existing = await Subscription.findOne({
+    const existing = await InstructorAssignment.findOne({
       memberId: req.user.id,
       instructorId: instructorId
     });
 
-    if (existing) {
-      if (existing.status === 'active' && existing.expiresAt > new Date()) {
-        return next(new ApiError('Already subscribed to this instructor', 400));
-      } else {
-        // Reactivate subscription with new payment - extend from current expiry or now
-        const baseDate = existing.expiresAt > new Date()
-          ? new Date(existing.expiresAt)
-          : new Date();
-        const newExpiresAt = new Date(baseDate);
-        newExpiresAt.setMonth(newExpiresAt.getMonth() + 1);
-
-        existing.status = 'active';
-        existing.subscribedAt = subscribedAt;
-        existing.expiresAt = newExpiresAt;
-        existing.cancelledAt = null;
-        existing.paymentId = paymentId;
-        await existing.save();
-        return res.json({
-          success: true,
-          message: 'Subscription reactivated',
-          data: { subscription: existing }
-        });
-      }
+    if (existing?.status === 'active' && existing.type === 'paid' && existing.endDate && existing.endDate > new Date()) {
+      return next(new ApiError('Already subscribed to this instructor', 400));
     }
 
-    // Create new subscription with payment reference and expiry date
-    const subscription = await Subscription.create({
+    const assignment = await assignmentService.activatePaidAssignment({
       memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active',
-      paymentId: paymentId,
-      subscribedAt: subscribedAt,
-      expiresAt: expiresAt
+      instructorId,
+      paymentId,
+      amount: payment.amount
     });
 
-    res.status(201).json({
+    res.status(existing ? 200 : 201).json({
       success: true,
-      message: 'Successfully subscribed to instructor',
-      data: { subscription }
+      message: existing ? 'Subscription reactivated' : 'Successfully subscribed to instructor',
+      data: { assignment }
     });
   } catch (err) {
     if (err.code === 11000) {
@@ -623,27 +479,23 @@ const subscribeToInstructor = async (req, res, next) => {
 
 const unsubscribeFromInstructor = async (req, res, next) => {
   try {
-    const Subscription = require('../models/Subscription');
     const { instructorId } = req.params;
 
-    const subscription = await Subscription.findOne({
+    const assignment = await assignmentService.cancelAssignment({
       memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
+      instructorId,
+      cancelledBy: 'member',
+      type: 'paid'
     });
 
-    if (!subscription) {
+    if (!assignment) {
       return next(new ApiError('Subscription not found', 404));
     }
-
-    subscription.status = 'cancelled';
-    subscription.cancelledAt = new Date();
-    await subscription.save();
 
     res.json({
       success: true,
       message: 'Successfully unsubscribed from instructor',
-      data: { subscription }
+      data: { assignment }
     });
   } catch (err) {
     console.error('Error unsubscribing from instructor:', err);
@@ -653,23 +505,22 @@ const unsubscribeFromInstructor = async (req, res, next) => {
 
 const checkSubscriptionStatus = async (req, res, next) => {
   try {
-    const Subscription = require('../models/Subscription');
     const { instructorId } = req.params;
 
-    const subscription = await Subscription.findOne({
-      memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
-    });
+    let assignment = await assignmentService.findActiveAssignment(
+      req.user.id,
+      instructorId,
+      { type: 'paid' }
+    );
 
-    // Check if subscription exists and is not expired
     let isSubscribed = false;
-    if (subscription) {
-      if (subscription.expiresAt && subscription.expiresAt <= new Date()) {
-        // Subscription has expired - update status
-        subscription.status = 'expired';
-        await subscription.save();
+
+    if (assignment) {
+      if (assignment.endDate && assignment.endDate <= new Date()) {
+        assignment.status = 'expired';
+        await assignment.save();
         isSubscribed = false;
+        assignment = null;
       } else {
         isSubscribed = true;
       }
@@ -678,9 +529,9 @@ const checkSubscriptionStatus = async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        isSubscribed: isSubscribed,
-        subscription: isSubscribed ? subscription : null,
-        expiresAt: isSubscribed ? subscription.expiresAt : null
+        isSubscribed,
+        assignment: isSubscribed ? assignment : null,
+        endDate: isSubscribed ? assignment.endDate : null
       }
     });
   } catch (err) {
@@ -691,7 +542,7 @@ const checkSubscriptionStatus = async (req, res, next) => {
 
 const uploadBeforeAfterPhoto = async (req, res, next) => {
   try {
-    const { photoType } = req.body; // 'before' or 'after'
+    const { photoType } = req.body;
     const file = req.file;
 
     if (!photoType || !['before', 'after'].includes(photoType)) {
@@ -702,46 +553,38 @@ const uploadBeforeAfterPhoto = async (req, res, next) => {
       return next(new ApiError('No file uploaded', 400));
     }
 
-    // Find instructor
     const instructor = await Instructor.findOne({ userId: req.user.id });
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
-    // Upload to Cloudinary
     const cloudinaryService = require('../services/cloudinary.service');
     const uploadResult = await cloudinaryService.uploadImage(
       file,
       `gym-management/instructors/${req.user.id}/transformation`
     );
 
-    // Delete old photo if exists
     const fieldName = photoType === 'before' ? 'beforePhoto' : 'afterPhoto';
     const oldPhoto = instructor[fieldName];
-    if (oldPhoto && typeof oldPhoto === 'object' && oldPhoto.public_id) {
+    const oldPublicId = oldPhoto?.publicId;
+
+    if (oldPublicId) {
       try {
-        await cloudinaryService.deleteFromCloudinary(oldPhoto.public_id, { resource_type: 'image' });
+        await cloudinaryService.deleteFromCloudinary(oldPublicId, { resource_type: 'image' });
       } catch (deleteError) {
         console.error('Error deleting old photo:', deleteError);
-        // Continue even if deletion fails
       }
     }
 
-    // Update instructor with new photo
-    instructor[fieldName] = {
-      secure_url: uploadResult.secure_url,
-      public_id: uploadResult.public_id
-    };
+    const photoAsset = toCloudinaryUploadResult(uploadResult);
+    instructor[fieldName] = photoAsset;
     await instructor.save();
 
     res.json({
       success: true,
       message: `${photoType === 'before' ? 'Before' : 'After'} photo uploaded successfully`,
       data: {
-        photo: {
-          secure_url: uploadResult.secure_url,
-          public_id: uploadResult.public_id
-        }
+        photo: photoAsset
       }
     });
   } catch (err) {
@@ -752,35 +595,31 @@ const uploadBeforeAfterPhoto = async (req, res, next) => {
 
 const deleteBeforeAfterPhoto = async (req, res, next) => {
   try {
-    const { photoType } = req.params; // 'before' or 'after'
+    const { photoType } = req.params;
 
     if (!photoType || !['before', 'after'].includes(photoType)) {
       return next(new ApiError('Photo type must be "before" or "after"', 400));
     }
 
-    // Find instructor
     const instructor = await Instructor.findOne({ userId: req.user.id });
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
-    // Get old photo
     const fieldName = photoType === 'before' ? 'beforePhoto' : 'afterPhoto';
     const oldPhoto = instructor[fieldName];
+    const publicId = oldPhoto?.publicId;
 
-    // Delete from Cloudinary if exists
-    if (oldPhoto && typeof oldPhoto === 'object' && oldPhoto.public_id) {
+    if (publicId) {
       try {
         const cloudinaryService = require('../services/cloudinary.service');
-        await cloudinaryService.deleteFromCloudinary(oldPhoto.public_id, { resource_type: 'image' });
+        await cloudinaryService.deleteFromCloudinary(publicId, { resource_type: 'image' });
       } catch (deleteError) {
         console.error('Error deleting photo from Cloudinary:', deleteError);
-        // Continue even if deletion fails
       }
     }
 
-    // Remove photo from instructor
-    instructor[fieldName] = null;
+    instructor[fieldName] = { secureUrl: null, publicId: null };
     await instructor.save();
 
     res.json({
@@ -793,18 +632,8 @@ const deleteBeforeAfterPhoto = async (req, res, next) => {
   }
 };
 
-// ==========================================
-// ALLOCATION FUNCTIONS (Free member-instructor pairing)
-// ==========================================
-
-/**
- * Member allocates themselves to an instructor (free, no payment)
- * A member can only be allocated to ONE instructor at a time.
- * Personal training subscriptions are independent and unaffected.
- */
 const allocateToInstructor = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
     const User = require('../models/User');
     const { instructorId } = req.body;
 
@@ -812,36 +641,28 @@ const allocateToInstructor = async (req, res, next) => {
       return next(new ApiError('Instructor ID is required', 400));
     }
 
-    // Check if instructor exists
     const instructor = await Instructor.findOne({ userId: instructorId });
     if (!instructor) {
       return next(new ApiError('Instructor not found', 404));
     }
 
-    // Check if instructor is accepting new members
     if (!instructor.acceptingMembers) {
       return next(new ApiError('This instructor is not accepting new members at the moment', 400));
     }
 
-    // Check if already allocated to THIS instructor
-    const existingSame = await Allocation.findOne({
-      memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
-    });
+    const existingSame = await assignmentService.findActiveAssignment(
+      req.user.id,
+      instructorId,
+      { type: 'free' }
+    );
 
     if (existingSame) {
       return next(new ApiError('You are already allocated to this instructor', 400));
     }
 
-    // Check if already allocated to ANY other instructor (one allocation per member rule)
-    const existingOther = await Allocation.findOne({
-      memberId: req.user.id,
-      status: 'active'
-    }).populate('instructorId', 'name');
+    const existingOther = await assignmentService.findMemberActiveFreeAssignment(req.user.id);
 
-    if (existingOther) {
-      // Get the other instructor's name for a helpful error message
+    if (existingOther && existingOther.instructorId.toString() !== instructorId.toString()) {
       let otherInstructorName = 'another instructor';
       try {
         const otherUser = await User.findById(existingOther.instructorId).select('name');
@@ -854,72 +675,44 @@ const allocateToInstructor = async (req, res, next) => {
       ));
     }
 
-    // Check if there's a cancelled allocation to this instructor, reactivate it
-    const cancelled = await Allocation.findOne({
+    const { assignment, created, reactivated } = await assignmentService.createFreeAssignment({
       memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'cancelled'
+      instructorId
     });
 
-    if (cancelled) {
-      cancelled.status = 'active';
-      cancelled.allocatedAt = new Date();
-      cancelled.cancelledAt = null;
-      cancelled.cancelledBy = null;
-      await cancelled.save();
-
-      return res.json({
-        success: true,
-        message: 'Successfully allocated to instructor',
-        data: { allocation: cancelled }
-      });
-    }
-
-    // Create new allocation
-    const allocation = await Allocation.create({
-      memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
-    });
-
-    res.status(201).json({
+    res.status(created ? 201 : 200).json({
       success: true,
       message: 'Successfully allocated to instructor',
-      data: { allocation }
+      data: { assignment, reactivated: !!reactivated }
     });
   } catch (err) {
+    if (err.statusCode === 400) {
+      return next(new ApiError(err.message, 400));
+    }
     console.error('Error allocating to instructor:', err);
     next(err);
   }
 };
 
-/**
- * Member removes their allocation from an instructor
- */
 const deallocateFromInstructor = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
     const { instructorId } = req.params;
 
-    const allocation = await Allocation.findOne({
+    const assignment = await assignmentService.cancelAssignment({
       memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
+      instructorId,
+      cancelledBy: 'member',
+      type: 'free'
     });
 
-    if (!allocation) {
+    if (!assignment) {
       return next(new ApiError('Allocation not found', 404));
     }
-
-    allocation.status = 'cancelled';
-    allocation.cancelledAt = new Date();
-    allocation.cancelledBy = 'member';
-    await allocation.save();
 
     res.json({
       success: true,
       message: 'Successfully deallocated from instructor',
-      data: { allocation }
+      data: { assignment }
     });
   } catch (err) {
     console.error('Error deallocating from instructor:', err);
@@ -927,25 +720,21 @@ const deallocateFromInstructor = async (req, res, next) => {
   }
 };
 
-/**
- * Member checks their allocation status with an instructor
- */
 const checkAllocationStatus = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
     const { instructorId } = req.params;
 
-    const allocation = await Allocation.findOne({
-      memberId: req.user.id,
-      instructorId: instructorId,
-      status: 'active'
-    });
+    const assignment = await assignmentService.findActiveAssignment(
+      req.user.id,
+      instructorId,
+      { type: 'free' }
+    );
 
     res.json({
       success: true,
       data: {
-        isAllocated: !!allocation,
-        allocation: allocation || null
+        isAllocated: !!assignment,
+        allocation: assignment || null
       }
     });
   } catch (err) {
@@ -954,41 +743,34 @@ const checkAllocationStatus = async (req, res, next) => {
   }
 };
 
-/**
- * Instructor views their allocated members (separate from subscribed clients)
- */
 const getMyAllocatedMembers = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
-
-    // Get instructor profile to verify
     const instructor = await Instructor.findOne({ userId: req.user.id });
     if (!instructor) {
       return next(new ApiError('Instructor profile not found', 404));
     }
 
-    // Get all active allocations for this instructor
-    const allocations = await Allocation.find({
+    const assignments = await InstructorAssignment.find({
       instructorId: req.user.id,
+      type: 'free',
       status: 'active'
     })
       .populate('memberId', 'name email phone profilePicture')
-      .sort({ allocatedAt: -1 })
+      .sort({ startDate: -1 })
       .lean();
 
-    // Transform to member format
-    const members = allocations
-      .filter(alloc => alloc.memberId != null)
-      .map(alloc => {
-        const member = alloc.memberId;
+    const members = assignments
+      .filter(assignment => assignment.memberId != null)
+      .map(assignment => {
+        const member = assignment.memberId;
         return {
           _id: member._id,
           name: member.name,
           email: member.email,
           phone: member.phone,
-          profilePicture: member.profilePicture,
-          allocatedAt: alloc.allocatedAt,
-          allocationId: alloc._id
+          profilePicture: getMediaUrl(member.profilePicture),
+          startDate: assignment.startDate,
+          assignmentId: assignment._id
         };
       });
 
@@ -1002,33 +784,25 @@ const getMyAllocatedMembers = async (req, res, next) => {
   }
 };
 
-/**
- * Instructor removes an allocated member
- */
 const removeAllocatedMember = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
     const { memberId } = req.params;
 
-    const allocation = await Allocation.findOne({
+    const assignment = await assignmentService.cancelAssignment({
+      memberId,
       instructorId: req.user.id,
-      memberId: memberId,
-      status: 'active'
+      cancelledBy: 'instructor',
+      type: 'free'
     });
 
-    if (!allocation) {
+    if (!assignment) {
       return next(new ApiError('Allocation not found', 404));
     }
-
-    allocation.status = 'cancelled';
-    allocation.cancelledAt = new Date();
-    allocation.cancelledBy = 'instructor';
-    await allocation.save();
 
     res.json({
       success: true,
       message: 'Member allocation cancelled',
-      data: { allocation }
+      data: { assignment }
     });
   } catch (err) {
     console.error('Error removing allocated member:', err);
@@ -1036,9 +810,6 @@ const removeAllocatedMember = async (req, res, next) => {
   }
 };
 
-/**
- * Instructor toggles whether they accept new member allocations
- */
 const toggleAcceptingMembers = async (req, res, next) => {
   try {
     const { acceptingMembers } = req.body;
@@ -1068,21 +839,13 @@ const toggleAcceptingMembers = async (req, res, next) => {
   }
 };
 
-/**
- * Member checks their current active allocation (to any instructor).
- * Returns the current allocation with instructor details, or null if not allocated.
- */
 const getMyCurrentAllocation = async (req, res, next) => {
   try {
-    const Allocation = require('../models/Allocation');
     const User = require('../models/User');
 
-    const allocation = await Allocation.findOne({
-      memberId: req.user.id,
-      status: 'active'
-    });
+    const assignment = await assignmentService.findMemberActiveFreeAssignment(req.user.id);
 
-    if (!allocation) {
+    if (!assignment) {
       return res.json({
         success: true,
         data: {
@@ -1093,18 +856,17 @@ const getMyCurrentAllocation = async (req, res, next) => {
       });
     }
 
-    // Get instructor details
     let instructorInfo = null;
     try {
-      const instructor = await Instructor.findOne({ userId: allocation.instructorId });
-      const user = await User.findById(allocation.instructorId).select('name email profilePicture');
+      const instructor = await Instructor.findOne({ userId: assignment.instructorId });
+      const user = await User.findById(assignment.instructorId).select('name email profilePicture');
       if (instructor && user) {
         instructorInfo = {
           _id: instructor._id,
-          userId: allocation.instructorId,
+          userId: assignment.instructorId,
           name: user.name,
           email: user.email,
-          profilePicture: user.profilePicture,
+          profilePicture: getMediaUrl(user.profilePicture),
           specializations: instructor.specializations,
           specialty: instructor.specializations?.[0] || null
         };
@@ -1115,7 +877,7 @@ const getMyCurrentAllocation = async (req, res, next) => {
       success: true,
       data: {
         hasAllocation: true,
-        allocation,
+        allocation: assignment,
         instructor: instructorInfo
       }
     });
@@ -1139,7 +901,6 @@ module.exports = {
   checkSubscriptionStatus,
   uploadBeforeAfterPhoto,
   deleteBeforeAfterPhoto,
-  // Allocation functions
   allocateToInstructor,
   deallocateFromInstructor,
   checkAllocationStatus,

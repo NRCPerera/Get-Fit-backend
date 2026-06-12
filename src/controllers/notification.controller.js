@@ -1,27 +1,32 @@
 const ApiError = require('../utils/ApiError');
 const Notification = require('../models/Notification');
+const NotificationRead = require('../models/NotificationRead');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
-// Admin: Create notification
+const getAudienceFilter = (user) => ({
+  isActive: true,
+  $or: [
+    { targetAudience: 'all' },
+    { targetAudience: user.role },
+  ],
+});
+
 const createNotification = async (req, res, next) => {
   try {
     const { title, message, link, linkText, targetAudience, priority, isActive } = req.body;
 
-    // Validate required fields
     if (!title || !message) {
       return next(new ApiError('Title and message are required', 400));
     }
 
-    // Validate targetAudience
     const validAudiences = ['member', 'instructor', 'all'];
     const audiences = Array.isArray(targetAudience) ? targetAudience : [targetAudience || 'all'];
-    const invalidAudiences = audiences.filter(a => !validAudiences.includes(a));
+    const invalidAudiences = audiences.filter((a) => !validAudiences.includes(a));
     if (invalidAudiences.length > 0) {
       return next(new ApiError(`Invalid target audience: ${invalidAudiences.join(', ')}`, 400));
     }
 
-    // Create notification
     const notification = await Notification.create({
       title,
       message,
@@ -30,20 +35,13 @@ const createNotification = async (req, res, next) => {
       targetAudience: audiences,
       priority: priority || 'medium',
       isActive: isActive !== undefined ? isActive : true,
-      createdBy: req.user.id
-    });
-
-    logger.info('Notification created', {
-      notificationId: notification._id,
-      title: notification.title,
-      targetAudience: notification.targetAudience,
-      createdBy: req.user.id
+      createdBy: req.user.id,
     });
 
     res.status(201).json({
       success: true,
       message: 'Notification created successfully',
-      data: { notification }
+      data: { notification },
     });
   } catch (err) {
     logger.error('Error creating notification:', err);
@@ -51,7 +49,6 @@ const createNotification = async (req, res, next) => {
   }
 };
 
-// Admin: Get all notifications
 const getAllNotifications = async (req, res, next) => {
   try {
     const { page = 1, limit = 20, targetAudience, isActive } = req.query;
@@ -74,7 +71,7 @@ const getAllNotifications = async (req, res, next) => {
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
-      Notification.countDocuments(filter)
+      Notification.countDocuments(filter),
     ]);
 
     res.json({
@@ -83,8 +80,8 @@ const getAllNotifications = async (req, res, next) => {
         items: notifications,
         total,
         page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
-      }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (err) {
     logger.error('Error getting notifications:', err);
@@ -92,22 +89,29 @@ const getAllNotifications = async (req, res, next) => {
   }
 };
 
-// Admin: Get notification by ID
 const getNotificationById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
     const notification = await Notification.findById(id)
-      .populate('createdBy', 'name email')
-      .populate('readBy.user', 'name email');
+      .populate('createdBy', 'name email');
 
     if (!notification) {
       return next(new ApiError('Notification not found', 404));
     }
 
+    const reads = await NotificationRead.find({ notificationId: id })
+      .populate('userId', 'name email')
+      .sort({ readAt: -1 })
+      .lean();
+
     res.json({
       success: true,
-      data: { notification }
+      data: {
+        notification,
+        reads,
+        readCount: reads.length,
+      },
     });
   } catch (err) {
     logger.error('Error getting notification:', err);
@@ -115,19 +119,16 @@ const getNotificationById = async (req, res, next) => {
   }
 };
 
-// Admin: Update notification
 const updateNotification = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, message, link, linkText, targetAudience, priority, isActive } = req.body;
 
     const notification = await Notification.findById(id);
-
     if (!notification) {
       return next(new ApiError('Notification not found', 404));
     }
 
-    // Update fields
     if (title !== undefined) notification.title = title;
     if (message !== undefined) notification.message = message;
     if (link !== undefined) notification.link = link;
@@ -141,15 +142,10 @@ const updateNotification = async (req, res, next) => {
 
     await notification.save();
 
-    logger.info('Notification updated', {
-      notificationId: notification._id,
-      updatedBy: req.user.id
-    });
-
     res.json({
       success: true,
       message: 'Notification updated successfully',
-      data: { notification }
+      data: { notification },
     });
   } catch (err) {
     logger.error('Error updating notification:', err);
@@ -157,27 +153,21 @@ const updateNotification = async (req, res, next) => {
   }
 };
 
-// Admin: Delete notification
 const deleteNotification = async (req, res, next) => {
   try {
     const { id } = req.params;
 
     const notification = await Notification.findById(id);
-
     if (!notification) {
       return next(new ApiError('Notification not found', 404));
     }
 
+    await NotificationRead.deleteMany({ notificationId: id });
     await notification.deleteOne();
-
-    logger.info('Notification deleted', {
-      notificationId: id,
-      deletedBy: req.user.id
-    });
 
     res.json({
       success: true,
-      message: 'Notification deleted successfully'
+      message: 'Notification deleted successfully',
     });
   } catch (err) {
     logger.error('Error deleting notification:', err);
@@ -185,55 +175,44 @@ const deleteNotification = async (req, res, next) => {
   }
 };
 
-// User: Get my notifications
 const getMyNotifications = async (req, res, next) => {
   try {
     const { page = 1, limit = 20, unreadOnly } = req.query;
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return next(new ApiError('User not found', 404));
     }
 
-    // Build filter based on user role and target audience
-    const filter = {
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: user.role }
-      ]
-    };
-
-    // If unreadOnly, filter out read notifications
-    if (unreadOnly === 'true') {
-      filter['readBy.user'] = { $ne: req.user.id };
-    }
-
+    const filter = getAudienceFilter(user);
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const [notifications, total] = await Promise.all([
+    const [notifications, total, readRecords] = await Promise.all([
       Notification.find(filter)
         .populate('createdBy', 'name')
         .sort({ sentAt: -1, createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
         .lean(),
-      Notification.countDocuments(filter)
+      Notification.countDocuments(filter),
+      NotificationRead.find({ userId: req.user.id }).lean(),
     ]);
 
-    // Mark which notifications are read
-    const notificationsWithReadStatus = notifications.map(notif => {
-      const isRead = notif.readBy.some(
-        read => read.user && read.user.toString() === req.user.id.toString()
-      );
+    const readMap = new Map(
+      readRecords.map((record) => [record.notificationId.toString(), record.readAt])
+    );
+
+    let notificationsWithReadStatus = notifications.map((notif) => {
+      const readAt = readMap.get(notif._id.toString()) || null;
       return {
         ...notif,
-        isRead,
-        readAt: isRead ? notif.readBy.find(
-          read => read.user && read.user.toString() === req.user.id.toString()
-        )?.readAt : null
+        isRead: !!readAt,
+        readAt,
       };
     });
+
+    if (unreadOnly === 'true') {
+      notificationsWithReadStatus = notificationsWithReadStatus.filter((notif) => !notif.isRead);
+    }
 
     res.json({
       success: true,
@@ -241,8 +220,8 @@ const getMyNotifications = async (req, res, next) => {
         items: notificationsWithReadStatus,
         total,
         page: parseInt(page),
-        pages: Math.ceil(total / parseInt(limit))
-      }
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (err) {
     logger.error('Error getting user notifications:', err);
@@ -250,34 +229,24 @@ const getMyNotifications = async (req, res, next) => {
   }
 };
 
-// User: Mark notification as read
 const markAsRead = async (req, res, next) => {
   try {
     const { id } = req.params;
 
     const notification = await Notification.findById(id);
-
     if (!notification) {
       return next(new ApiError('Notification not found', 404));
     }
 
-    // Check if already read
-    const alreadyRead = notification.readBy.some(
-      read => read.user && read.user.toString() === req.user.id.toString()
+    await NotificationRead.findOneAndUpdate(
+      { notificationId: id, userId: req.user.id },
+      { readAt: new Date() },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-
-    if (!alreadyRead) {
-      notification.readBy.push({
-        user: req.user.id,
-        readAt: new Date()
-      });
-      await notification.save();
-    }
 
     res.json({
       success: true,
       message: 'Notification marked as read',
-      data: { notification }
     });
   } catch (err) {
     logger.error('Error marking notification as read:', err);
@@ -285,42 +254,32 @@ const markAsRead = async (req, res, next) => {
   }
 };
 
-// User: Mark all notifications as read
 const markAllAsRead = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return next(new ApiError('User not found', 404));
     }
 
-    // Find all unread notifications for this user
-    const filter = {
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: user.role }
-      ],
-      'readBy.user': { $ne: req.user.id }
-    };
+    const notifications = await Notification.find(getAudienceFilter(user)).select('_id').lean();
+    const now = new Date();
 
-    const notifications = await Notification.find(filter);
+    const ops = notifications.map((notif) => ({
+      updateOne: {
+        filter: { notificationId: notif._id, userId: req.user.id },
+        update: { $set: { readAt: now } },
+        upsert: true,
+      },
+    }));
 
-    // Mark each as read
-    const updatePromises = notifications.map(notif => {
-      notif.readBy.push({
-        user: req.user.id,
-        readAt: new Date()
-      });
-      return notif.save();
-    });
-
-    await Promise.all(updatePromises);
+    if (ops.length > 0) {
+      await NotificationRead.bulkWrite(ops);
+    }
 
     res.json({
       success: true,
       message: 'All notifications marked as read',
-      data: { count: notifications.length }
+      data: { count: notifications.length },
     });
   } catch (err) {
     logger.error('Error marking all notifications as read:', err);
@@ -328,29 +287,24 @@ const markAllAsRead = async (req, res, next) => {
   }
 };
 
-// User: Get unread notification count
 const getUnreadCount = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
-
     if (!user) {
       return next(new ApiError('User not found', 404));
     }
 
-    const filter = {
-      isActive: true,
-      $or: [
-        { targetAudience: 'all' },
-        { targetAudience: user.role }
-      ],
-      'readBy.user': { $ne: req.user.id }
-    };
+    const notifications = await Notification.find(getAudienceFilter(user)).select('_id').lean();
+    const readRecords = await NotificationRead.find({
+      userId: req.user.id,
+      notificationId: { $in: notifications.map((n) => n._id) },
+    }).select('notificationId').lean();
 
-    const count = await Notification.countDocuments(filter);
+    const unreadCount = Math.max(notifications.length - readRecords.length, 0);
 
     res.json({
       success: true,
-      data: { unreadCount: count }
+      data: { unreadCount },
     });
   } catch (err) {
     logger.error('Error getting unread count:', err);
@@ -358,7 +312,6 @@ const getUnreadCount = async (req, res, next) => {
   }
 };
 
-// User: Register push token
 const registerPushToken = async (req, res, next) => {
   try {
     const { token } = req.body;
@@ -367,18 +320,15 @@ const registerPushToken = async (req, res, next) => {
       return next(new ApiError('Push token is required', 400));
     }
 
-    // Validate Expo push token format
     if (!token.startsWith('ExponentPushToken[') && !token.startsWith('ExpoPushToken[')) {
       return next(new ApiError('Invalid Expo push token format', 400));
     }
 
     await User.findByIdAndUpdate(req.user.id, { expoPushToken: token });
 
-    logger.info('Push token registered', { userId: req.user.id });
-
     res.json({
       success: true,
-      message: 'Push token registered successfully'
+      message: 'Push token registered successfully',
     });
   } catch (err) {
     logger.error('Error registering push token:', err);
@@ -386,16 +336,13 @@ const registerPushToken = async (req, res, next) => {
   }
 };
 
-// User: Remove push token (for logout)
 const removePushToken = async (req, res, next) => {
   try {
     await User.findByIdAndUpdate(req.user.id, { expoPushToken: null });
 
-    logger.info('Push token removed', { userId: req.user.id });
-
     res.json({
       success: true,
-      message: 'Push token removed successfully'
+      message: 'Push token removed successfully',
     });
   } catch (err) {
     logger.error('Error removing push token:', err);
@@ -404,18 +351,15 @@ const removePushToken = async (req, res, next) => {
 };
 
 module.exports = {
-  // Admin endpoints
   createNotification,
   getAllNotifications,
   getNotificationById,
   updateNotification,
   deleteNotification,
-  // User endpoints
   getMyNotifications,
   markAsRead,
   markAllAsRead,
   getUnreadCount,
   registerPushToken,
-  removePushToken
+  removePushToken,
 };
-
