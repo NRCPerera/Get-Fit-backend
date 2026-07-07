@@ -1,7 +1,8 @@
 const ApiError = require('../utils/ApiError');
 const Payment = require('../models/Payment');
 const config = require('../config/environment');
-const { activatePaidAssignment } = require('../services/instructorAssignment.service');
+const assignmentService = require('../services/instructorAssignment.service');
+const { activatePaidAssignment } = assignmentService;
 const payhereService = require('../services/payhere.service');
 const User = require('../models/User');
 const { sendPaymentReceiptEmail } = require('../services/email.service');
@@ -439,6 +440,19 @@ const createSubscriptionPayment = async (req, res, next) => {
     const instructorUser = await User.findById(instructorId);
     if (!instructorUser) {
       return next(new ApiError('Instructor user not found', 404));
+    }
+    const existingPaidAssignment = await assignmentService.findMemberActivePaidAssignment(req.user.id);
+    if (existingPaidAssignment && existingPaidAssignment.instructorId.toString() !== instructorId.toString()) {
+      let otherInstructorName = 'another instructor';
+      try {
+        const otherInstructorUser = await User.findById(existingPaidAssignment.instructorId).select('name');
+        if (otherInstructorUser?.name) otherInstructorName = otherInstructorUser.name;
+      } catch (e) { /* ignore */ }
+
+      return next(new ApiError(
+        'You are already subscribed to ' + otherInstructorName + '. Please unsubscribe from your current personal training instructor before subscribing to a new one.',
+        400
+      ));
     }
 
     // Get user details (the customer making the payment)

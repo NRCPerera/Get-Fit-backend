@@ -447,6 +447,21 @@ const subscribeToInstructor = async (req, res, next) => {
       return next(new ApiError('Instructor not found', 404));
     }
 
+    const existingOtherPaid = await assignmentService.findMemberActivePaidAssignment(req.user.id);
+    if (existingOtherPaid && existingOtherPaid.instructorId.toString() !== instructorId.toString()) {
+      const User = require('../models/User');
+      let otherInstructorName = 'another instructor';
+      try {
+        const otherUser = await User.findById(existingOtherPaid.instructorId).select('name');
+        if (otherUser?.name) otherInstructorName = otherUser.name;
+      } catch (e) { /* ignore */ }
+
+      return next(new ApiError(
+        `You are already subscribed to ${otherInstructorName}. Please unsubscribe from your current personal training instructor before subscribing to a new one.`,
+        400
+      ));
+    }
+
     const existing = await InstructorAssignment.findOne({
       memberId: req.user.id,
       instructorId: instructorId
@@ -839,6 +854,54 @@ const toggleAcceptingMembers = async (req, res, next) => {
   }
 };
 
+const getMyCurrentSubscription = async (req, res, next) => {
+  try {
+    const User = require('../models/User');
+
+    const assignment = await assignmentService.findMemberActivePaidAssignment(req.user.id);
+
+    if (!assignment) {
+      return res.json({
+        success: true,
+        data: {
+          hasSubscription: false,
+          subscription: null,
+          instructor: null
+        }
+      });
+    }
+
+    let instructorInfo = null;
+    try {
+      const instructor = await Instructor.findOne({ userId: assignment.instructorId });
+      const user = await User.findById(assignment.instructorId).select('name email profilePicture');
+      if (instructor && user) {
+        instructorInfo = {
+          _id: instructor._id,
+          userId: assignment.instructorId,
+          name: user.name,
+          email: user.email,
+          profilePicture: getMediaUrl(user.profilePicture),
+          specializations: instructor.specializations,
+          specialty: instructor.specializations?.[0] || null
+        };
+      }
+    } catch (e) { /* ignore */ }
+
+    res.json({
+      success: true,
+      data: {
+        hasSubscription: true,
+        subscription: assignment,
+        instructor: instructorInfo
+      }
+    });
+  } catch (err) {
+    console.error('Error getting current subscription:', err);
+    next(err);
+  }
+};
+
 const getMyCurrentAllocation = async (req, res, next) => {
   try {
     const User = require('../models/User');
@@ -905,6 +968,7 @@ module.exports = {
   deallocateFromInstructor,
   checkAllocationStatus,
   getMyCurrentAllocation,
+  getMyCurrentSubscription,
   getMyAllocatedMembers,
   removeAllocatedMember,
   toggleAcceptingMembers

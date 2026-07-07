@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken, optionalAuth } = require('../middlewares/auth.middleware');
 const { requireInstructor, requireAdmin } = require('../middlewares/role.middleware');
-const { getAllInstructors, getInstructorById, updateInstructorProfile, getMyProfile, getInstructorStats, getMyClients, updateAvailability, becomeInstructor, subscribeToInstructor, unsubscribeFromInstructor, checkSubscriptionStatus, uploadBeforeAfterPhoto, deleteBeforeAfterPhoto, allocateToInstructor, deallocateFromInstructor, checkAllocationStatus, getMyCurrentAllocation, getMyAllocatedMembers, removeAllocatedMember, toggleAcceptingMembers } = require('../controllers/instructor.controller');
+const { getAllInstructors, getInstructorById, updateInstructorProfile, getMyProfile, getInstructorStats, getMyClients, updateAvailability, becomeInstructor, subscribeToInstructor, unsubscribeFromInstructor, checkSubscriptionStatus, uploadBeforeAfterPhoto, deleteBeforeAfterPhoto, allocateToInstructor, deallocateFromInstructor, checkAllocationStatus, getMyCurrentAllocation, getMyCurrentSubscription, getMyAllocatedMembers, removeAllocatedMember, toggleAcceptingMembers } = require('../controllers/instructor.controller');
 const { getClientMeasurements } = require('../controllers/measurement.controller');
 const { uploadImage } = require('../middlewares/upload.middleware');
 
@@ -27,6 +27,7 @@ router.post('/subscribe', verifyToken, requireMember, subscribeToInstructor);
 
 // Allocation routes (free member self-allocation)
 router.get('/my-allocation', verifyToken, requireMember, getMyCurrentAllocation);
+router.get('/my-subscription', verifyToken, requireMember, getMyCurrentSubscription);
 router.post('/allocate', verifyToken, requireMember, allocateToInstructor);
 
 // This must come AFTER all static routes to avoid matching them as :id

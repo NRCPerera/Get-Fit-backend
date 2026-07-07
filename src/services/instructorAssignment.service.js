@@ -31,6 +31,18 @@ const findMemberActiveFreeAssignment = (memberId) => (
   })
 );
 
+const findMemberActivePaidAssignment = (memberId) => (
+  InstructorAssignment.findOne({
+    memberId,
+    type: 'paid',
+    status: 'active',
+    $or: [
+      { endDate: null },
+      { endDate: { $gt: new Date() } },
+    ],
+  })
+);
+
 const activatePaidAssignment = async ({
   memberId,
   instructorId,
@@ -38,6 +50,13 @@ const activatePaidAssignment = async ({
   amount = 0,
   startDate = new Date(),
 }) => {
+  const otherActivePaidAssignment = await findMemberActivePaidAssignment(memberId);
+  if (otherActivePaidAssignment && otherActivePaidAssignment.instructorId.toString() !== instructorId.toString()) {
+    const error = new Error('Member already has an active paid assignment with another instructor');
+    error.statusCode = 400;
+    throw error;
+  }
+
   const existing = await InstructorAssignment.findOne({ memberId, instructorId });
   const endDate = new Date(startDate);
   endDate.setMonth(endDate.getMonth() + 1);
@@ -155,6 +174,7 @@ module.exports = {
   expireAssignments,
   findActiveAssignment,
   findMemberActiveFreeAssignment,
+  findMemberActivePaidAssignment,
   activatePaidAssignment,
   cancelAssignment,
   createFreeAssignment,
