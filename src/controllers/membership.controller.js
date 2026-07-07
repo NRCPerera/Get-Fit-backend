@@ -112,6 +112,7 @@ const purchaseMembership = async (req, res, next) => {
       currency: currency,
       status: 'pending',
       paymentMethod: 'payhere',
+      paymentType: 'membership',
       payhereOrderId: orderId,
       description: `${plan.name} Membership`,
       metadata: {
@@ -196,3 +197,4 @@ module.exports = {
   purchaseMembership,
   getAllMemberships,
 };
+
