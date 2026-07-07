@@ -455,6 +455,20 @@ const createSubscriptionPayment = async (req, res, next) => {
       ));
     }
 
+    const existingFreeAssignment = await assignmentService.findMemberActiveFreeAssignment(req.user.id);
+    if (existingFreeAssignment && existingFreeAssignment.instructorId.toString() !== instructorId.toString()) {
+      let allocatedInstructorName = 'another instructor';
+      try {
+        const allocatedInstructorUser = await User.findById(existingFreeAssignment.instructorId).select('name');
+        if (allocatedInstructorUser?.name) allocatedInstructorName = allocatedInstructorUser.name;
+      } catch (e) { /* ignore */ }
+
+      return next(new ApiError(
+        'You are already allocated to ' + allocatedInstructorName + '. Please remove your current instructor allocation before subscribing to a different instructor for personal training.',
+        400
+      ));
+    }
+
     // Get user details (the customer making the payment)
     const user = await User.findById(req.user.id);
     if (!user) {

@@ -50,6 +50,13 @@ const activatePaidAssignment = async ({
   amount = 0,
   startDate = new Date(),
 }) => {
+  const otherActiveFreeAssignment = await findMemberActiveFreeAssignment(memberId);
+  if (otherActiveFreeAssignment && otherActiveFreeAssignment.instructorId.toString() !== instructorId.toString()) {
+    const error = new Error('Member is already allocated to a different instructor');
+    error.statusCode = 400;
+    throw error;
+  }
+
   const otherActivePaidAssignment = await findMemberActivePaidAssignment(memberId);
   if (otherActivePaidAssignment && otherActivePaidAssignment.instructorId.toString() !== instructorId.toString()) {
     const error = new Error('Member already has an active paid assignment with another instructor');
