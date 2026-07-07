@@ -25,6 +25,7 @@ const membershipRoutes = require('./routes/membership.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const messageRoutes = require('./routes/message.routes');
 const workoutRoutes = require('./routes/workout.routes');
+const appVersionRoutes = require('./routes/appVersion.routes');
 
 const app = express();
 
@@ -374,6 +375,7 @@ app.use('/api/v1/memberships', membershipRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1/messages', messageRoutes);
 app.use('/api/v1/workouts', workoutRoutes);
+app.use('/api/app-version', appVersionRoutes);
 
 // Cleanup stale pending payments on startup and periodically
 const cleanupStalePendingPayments = async () => {
@@ -405,4 +407,5 @@ app.use(notFound);
 app.use(errorHandler);
 
 module.exports = app;
+
 

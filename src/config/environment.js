@@ -47,6 +47,14 @@ const config = {
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:3000',
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
 
+  // Mobile app version enforcement
+  IOS_MINIMUM_VERSION: process.env.IOS_MINIMUM_VERSION || '0.0.0',
+  ANDROID_MINIMUM_VERSION: process.env.ANDROID_MINIMUM_VERSION || '0.0.0',
+  IOS_LATEST_VERSION: process.env.IOS_LATEST_VERSION || process.env.IOS_MINIMUM_VERSION || '0.0.0',
+  ANDROID_LATEST_VERSION: process.env.ANDROID_LATEST_VERSION || process.env.ANDROID_MINIMUM_VERSION || '0.0.0',
+  IOS_STORE_URL: process.env.IOS_STORE_URL || 'https://apps.apple.com/app/6756215521',
+  ANDROID_STORE_URL: process.env.ANDROID_STORE_URL || 'https://play.google.com/store/apps/details?id=com.getfit.app',
+
   // Rate limiting
   RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
   RATE_LIMIT_MAX_REQUESTS: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
@@ -75,3 +83,4 @@ if (config.NODE_ENV === 'production') {
 }
 
 module.exports = config;
+
