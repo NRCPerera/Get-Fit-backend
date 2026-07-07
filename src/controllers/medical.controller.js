@@ -14,8 +14,7 @@ const createMedicalForm = async (req, res, next) => {
 const getMedicalForm = async (req, res, next) => {
   try {
     const form = await MedicalForm.findOne({ userId: req.user.id });
-    if (!form) return next(new ApiError('Medical form not found', 404));
-    res.json({ success: true, data: { form } });
+    res.json({ success: true, data: { form: form || null } });
   } catch (err) { next(err); }
 };
 
@@ -42,5 +41,6 @@ module.exports = {
   updateMedicalForm,
   getClientMedicalForm
 };
+
 
 
