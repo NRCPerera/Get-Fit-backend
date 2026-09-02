@@ -765,6 +765,73 @@ const allocateInstructor = async (req, res, next) => {
   }
 };
 
+const updateInstructor = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const {
+      // User fields
+      name,
+      email,
+      phone,
+      // Instructor fields
+      specializations,
+      experience,
+      monthlyRate,
+      bio,
+      isAvailable
+    } = req.body;
+
+    // Find instructor by _id
+    const instructor = await Instructor.findById(id);
+    if (!instructor) {
+      return next(new ApiError('Instructor not found', 404));
+    }
+
+    // Update User fields if provided
+    const userUpdates = {};
+    if (name !== undefined) userUpdates.name = name;
+    if (email !== undefined) userUpdates.email = email.toLowerCase();
+    if (phone !== undefined) userUpdates.phone = phone;
+
+    if (Object.keys(userUpdates).length > 0) {
+      // If email is being changed, check for duplicates
+      if (userUpdates.email) {
+        const existingUser = await User.findOne({
+          email: userUpdates.email,
+          _id: { $ne: instructor.userId }
+        });
+        if (existingUser) {
+          return next(new ApiError('A user with this email already exists', 400));
+        }
+      }
+      await User.findByIdAndUpdate(instructor.userId, userUpdates, { runValidators: true });
+    }
+
+    // Update Instructor fields if provided
+    const instructorUpdates = {};
+    if (specializations !== undefined) instructorUpdates.specializations = specializations;
+    if (experience !== undefined) instructorUpdates.experience = parseInt(experience) || 0;
+    if (monthlyRate !== undefined) instructorUpdates.monthlyRate = parseFloat(monthlyRate);
+    if (bio !== undefined) instructorUpdates.bio = bio;
+    if (isAvailable !== undefined) instructorUpdates.isAvailable = isAvailable;
+
+    if (Object.keys(instructorUpdates).length > 0) {
+      await Instructor.findByIdAndUpdate(id, instructorUpdates, { new: true, runValidators: true });
+    }
+
+    // Fetch updated instructor with populated user
+    const updatedInstructor = await Instructor.findById(id).populate('user');
+
+    res.json({
+      success: true,
+      message: 'Instructor updated successfully',
+      data: { instructor: updatedInstructor }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -774,6 +841,7 @@ module.exports = {
   getAllInstructors,
   approveInstructor,
   createInstructor,
+  updateInstructor,
   getAllPayments,
   getAllExercises,
   getAnalytics,
