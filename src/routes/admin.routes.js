@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../middlewares/auth.middleware');
 const { requireAdmin } = require('../middlewares/role.middleware');
-const { getDashboardStats, getAllUsers, getUserDetails, suspendUser, activateUser, getAllInstructors, approveInstructor, createInstructor, updateInstructor, getAllPayments, getAllExercises, getAnalytics, getAllInstructorAssignments, allocateInstructor } = require('../controllers/admin.controller');
+const { getDashboardStats, getAllUsers, getUserDetails, suspendUser, activateUser, getAllInstructors, approveInstructor, createInstructor, updateInstructor, deleteInstructor, getAllPayments, getAllExercises, getAnalytics, getAllInstructorAssignments, allocateInstructor } = require('../controllers/admin.controller');
 
 router.use(verifyToken, requireAdmin);
 
@@ -14,6 +14,7 @@ router.post('/users/:id/activate', activateUser);
 router.get('/instructors', getAllInstructors);
 router.post('/instructors', createInstructor);
 router.put('/instructors/:id', updateInstructor);
+router.delete('/instructors/:id', deleteInstructor);
 router.post('/instructors/:userId/approve', approveInstructor);
 router.get('/payments', getAllPayments);
 router.get('/exercises', getAllExercises);

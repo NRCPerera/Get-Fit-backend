@@ -950,6 +950,60 @@ const getMyCurrentAllocation = async (req, res, next) => {
   }
 };
 
+const deleteInstructor = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const User = require('../models/User');
+
+    const instructor = await Instructor.findById(id);
+    if (!instructor) {
+      return next(new ApiError('Instructor not found', 404));
+    }
+
+    // Cancel all active assignments for this instructor
+    await InstructorAssignment.updateMany(
+      { instructorId: instructor.userId, status: 'active' },
+      {
+        status: 'cancelled',
+        cancelledAt: new Date(),
+        cancelledBy: 'admin'
+      }
+    );
+
+    // Delete Cloudinary photos if they exist
+    const beforePublicId = instructor.beforePhoto?.publicId;
+    const afterPublicId = instructor.afterPhoto?.publicId;
+
+    if (beforePublicId || afterPublicId) {
+      try {
+        const cloudinaryService = require('../services/cloudinary.service');
+        if (beforePublicId) {
+          await cloudinaryService.deleteFromCloudinary(beforePublicId, { resource_type: 'image' });
+        }
+        if (afterPublicId) {
+          await cloudinaryService.deleteFromCloudinary(afterPublicId, { resource_type: 'image' });
+        }
+      } catch (deleteError) {
+        console.error('Error deleting instructor photos from Cloudinary:', deleteError);
+      }
+    }
+
+    // Delete the instructor profile
+    await Instructor.findByIdAndDelete(id);
+
+    // Revert the user's role back to 'member'
+    await User.findByIdAndUpdate(instructor.userId, { role: 'member' });
+
+    res.json({
+      success: true,
+      message: 'Instructor deleted successfully'
+    });
+  } catch (err) {
+    console.error('Error deleting instructor:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getAllInstructors,
   getInstructorById,
@@ -971,5 +1025,6 @@ module.exports = {
   getMyCurrentSubscription,
   getMyAllocatedMembers,
   removeAllocatedMember,
-  toggleAcceptingMembers
+  toggleAcceptingMembers,
+  deleteInstructor
 };
