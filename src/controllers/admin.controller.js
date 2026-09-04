@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Payment = require('../models/Payment');
 const Exercise = require('../models/Exercise');
 const Instructor = require('../models/Instructor');
+const Notification = require('../models/Notification');
+const Workout = require('../models/Workout');
 const TrainingSchedule = require('../models/TrainingSchedule');
 const InstructorAssignment = require('../models/InstructorAssignment');
 const { createFreeAssignment, cancelAssignment } = require('../services/instructorAssignment.service');
@@ -26,128 +28,196 @@ const getDashboardStats = async (req, res, next) => {
       recentUsers,
       recentPayments,
       recentInstructors,
-      recentExercises
+      recentExercises,
+      recentWorkouts,
+      recentNotifications,
+      recentAssignments
     ] = await Promise.all([
-      // Total members
       User.countDocuments({ role: 'member' }),
-      // Total instructors
       Instructor.countDocuments({}),
-      // Active today (users who logged in today)
       User.countDocuments({
         lastLogin: { $gte: todayStart },
         role: 'member',
         isActive: true
       }),
-      // Monthly revenue
       Payment.aggregate([
         { $match: { status: 'completed', createdAt: { $gte: thisMonthStart } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
-      // Last month revenue for comparison
       Payment.aggregate([
         { $match: { status: 'completed', createdAt: { $gte: lastMonthStart, $lte: lastMonthEnd } } },
         { $group: { _id: null, total: { $sum: '$amount' } } }
       ]),
-      // Recent users (last 5)
       User.find({ role: 'member' })
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(10)
         .select('name email createdAt')
         .lean(),
-      // Recent payments (last 5)
       Payment.find({})
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(10)
         .populate('userId', 'name email')
         .lean(),
-      // Recent instructors (last 5)
       Instructor.find({})
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(10)
         .populate('userId', 'name email')
         .lean(),
-      // Recent exercises (last 5)
       Exercise.find({})
         .sort({ createdAt: -1 })
-        .limit(5)
+        .limit(10)
         .select('name createdAt')
+        .lean(),
+      Workout.find({})
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .select('name createdAt')
+        .lean(),
+      Notification.find({})
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(10)
+        .populate('createdBy', 'name email')
+        .select('title targetAudience priority isActive createdBy createdAt updatedAt')
+        .lean(),
+      InstructorAssignment.find({})
+        .sort({ updatedAt: -1, createdAt: -1 })
+        .limit(10)
+        .populate('memberId', 'name email')
+        .populate('instructorId', 'name email')
+        .select('memberId instructorId type status cancelledAt cancelledBy createdAt updatedAt')
         .lean()
     ]);
 
-    // Calculate percentage changes
     const revenueChange = lastMonthRevenue[0]?.total
       ? ((monthlyRevenue[0]?.total || 0) - lastMonthRevenue[0].total) / lastMonthRevenue[0].total * 100
       : 0;
 
-    // Format recent activity
     const recentActivity = [];
+    const pushActivity = ({ type, name, timestamp, icon, color }) => {
+      if (!timestamp) return;
 
-    // Add recent users
-    recentUsers.forEach(user => {
       recentActivity.push({
+        type,
+        name,
+        time: getTimeAgo(timestamp),
+        icon,
+        color,
+        timestamp: new Date(timestamp),
+      });
+    };
+
+    recentUsers.forEach((user) => {
+      pushActivity({
         type: 'New Member',
         name: user.name,
-        time: getTimeAgo(user.createdAt),
+        timestamp: user.createdAt,
         icon: 'person-add',
-        color: '#51CF66'
+        color: '#51CF66',
       });
     });
 
-    // Add recent payments
-    recentPayments.forEach(payment => {
-      if (payment.userId) {
-        recentActivity.push({
-          type: 'Payment',
-          name: `${payment.userId.name} - $${payment.amount.toFixed(2)}`,
-          time: getTimeAgo(payment.createdAt),
-          icon: 'cash',
-          color: '#4C6EF5'
-        });
-      }
+    recentPayments.forEach((payment) => {
+      if (!payment.userId) return;
+
+      pushActivity({
+        type: 'Payment',
+        name: payment.userId.name + ' - $' + payment.amount.toFixed(2),
+        timestamp: payment.createdAt,
+        icon: 'cash',
+        color: '#4C6EF5',
+      });
     });
 
-    // Add recent instructors
-    recentInstructors.forEach(instructor => {
-      if (instructor.userId) {
-        recentActivity.push({
-          type: 'New Instructor',
-          name: instructor.userId.name,
-          time: getTimeAgo(instructor.createdAt),
-          icon: 'fitness',
-          color: '#15AABF'
-        });
-      }
+    recentInstructors.forEach((instructor) => {
+      if (!instructor.userId) return;
+
+      pushActivity({
+        type: 'New Instructor',
+        name: instructor.userId.name,
+        timestamp: instructor.createdAt,
+        icon: 'fitness',
+        color: '#15AABF',
+      });
     });
 
-    // Add recent exercises
-    recentExercises.forEach(exercise => {
-      recentActivity.push({
+    recentExercises.forEach((exercise) => {
+      pushActivity({
         type: 'Exercise Added',
         name: exercise.name,
-        time: getTimeAgo(exercise.createdAt),
+        timestamp: exercise.createdAt,
         icon: 'add-circle',
-        color: '#FCC419'
+        color: '#FCC419',
       });
     });
 
-    // Sort by time (most recent first) and limit to 10
-    recentActivity.sort((a, b) => {
-      const timeA = parseTimeAgo(a.time);
-      const timeB = parseTimeAgo(b.time);
-      return timeB - timeA;
+    recentWorkouts.forEach((workout) => {
+      pushActivity({
+        type: 'Workout Added',
+        name: workout.name,
+        timestamp: workout.createdAt,
+        icon: 'barbell',
+        color: '#FF922B',
+      });
     });
+
+    recentNotifications.forEach((notification) => {
+      const audienceLabel = Array.isArray(notification.targetAudience)
+        ? notification.targetAudience.join(', ')
+        : 'all';
+      const wasUpdated = notification.updatedAt && notification.createdAt
+        && new Date(notification.updatedAt).getTime() !== new Date(notification.createdAt).getTime();
+
+      pushActivity({
+        type: wasUpdated ? 'Notification Updated' : 'Notification Created',
+        name: `${notification.title} (${audienceLabel})`,
+        timestamp: wasUpdated ? notification.updatedAt : notification.createdAt,
+        icon: 'notifications',
+        color: notification.isActive ? '#E64980' : '#868E96',
+      });
+    });
+
+    recentAssignments.forEach((assignment) => {
+      const memberName = assignment.memberId?.name || 'Member';
+      const instructorName = assignment.instructorId?.name || 'Instructor';
+      const assignmentLabel = assignment.type === 'paid' ? 'PT Subscription' : 'Instructor Allocation';
+
+      if (assignment.status === 'cancelled' && assignment.cancelledAt) {
+        pushActivity({
+          type: `${assignmentLabel} Cancelled`,
+          name: `${memberName} - ${instructorName}`,
+          timestamp: assignment.cancelledAt,
+          icon: 'close-circle',
+          color: '#FA5252',
+        });
+        return;
+      }
+
+      if (assignment.status === 'active') {
+        pushActivity({
+          type: assignmentLabel,
+          name: `${memberName} - ${instructorName}`,
+          timestamp: assignment.updatedAt || assignment.createdAt,
+          icon: 'link',
+          color: assignment.type === 'paid' ? '#7048E8' : '#1098AD',
+        });
+      }
+    });
+
+    recentActivity.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     res.json({
       success: true,
       data: {
         stats: {
-          totalMembers: totalMembers,
-          activeToday: activeToday,
+          totalMembers,
+          activeToday,
           monthlyRevenue: monthlyRevenue[0]?.total || 0,
           instructors: totalInstructors,
           revenueChange: parseFloat(revenueChange.toFixed(1))
         },
-        recentActivity: recentActivity.slice(0, 10)
+        recentActivity: recentActivity
+          .slice(0, 10)
+          .map(({ timestamp, ...activity }) => activity)
       }
     });
   } catch (err) {
@@ -169,20 +239,6 @@ const getTimeAgo = (date) => {
   if (days < 7) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
   return new Date(date).toLocaleDateString();
 };
-
-// Helper function to parse time ago for sorting
-const parseTimeAgo = (timeStr) => {
-  if (timeStr === 'Just now') return 0;
-  const match = timeStr.match(/(\d+)\s*(minute|hour|day)/);
-  if (!match) return Infinity;
-  const value = parseInt(match[1]);
-  const unit = match[2];
-  if (unit === 'minute') return value;
-  if (unit === 'hour') return value * 60;
-  if (unit === 'day') return value * 60 * 24;
-  return Infinity;
-};
-
 const getAllUsers = async (req, res, next) => {
   try {
     const { page = 1, limit = 20, role, isActive, status } = req.query;
@@ -943,5 +999,8 @@ module.exports = {
   allocateInstructor,
   deallocateInstructor,
 };
+
+
+
 
 
