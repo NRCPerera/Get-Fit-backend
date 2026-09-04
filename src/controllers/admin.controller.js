@@ -5,7 +5,7 @@ const Exercise = require('../models/Exercise');
 const Instructor = require('../models/Instructor');
 const TrainingSchedule = require('../models/TrainingSchedule');
 const InstructorAssignment = require('../models/InstructorAssignment');
-const { createFreeAssignment } = require('../services/instructorAssignment.service');
+const { createFreeAssignment, cancelAssignment } = require('../services/instructorAssignment.service');
 
 const getDashboardStats = async (req, res, next) => {
   try {
@@ -885,6 +885,45 @@ const deleteInstructor = async (req, res, next) => {
   }
 };
 
+const deallocateInstructor = async (req, res, next) => {
+  try {
+    const { assignmentId } = req.params;
+
+    if (!assignmentId) {
+      return next(new ApiError('Assignment ID is required', 400));
+    }
+
+    const assignment = await InstructorAssignment.findById(assignmentId);
+    if (!assignment) {
+      return next(new ApiError('Assignment not found', 404));
+    }
+
+    if (assignment.status !== 'active') {
+      return next(new ApiError('Assignment is not active', 400));
+    }
+
+    const cancelled = await cancelAssignment({
+      memberId: assignment.memberId,
+      instructorId: assignment.instructorId,
+      cancelledBy: 'admin',
+      type: assignment.type,
+    });
+
+    if (!cancelled) {
+      return next(new ApiError('Failed to deallocate assignment', 500));
+    }
+
+    res.json({
+      success: true,
+      message: 'Instructor deallocated successfully',
+      data: { assignment: cancelled },
+    });
+  } catch (err) {
+    console.error('Error deallocating instructor:', err);
+    next(err);
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -902,6 +941,7 @@ module.exports = {
   getAllInstructorAssignments,
   getAllSubscriptions: getAllInstructorAssignments,
   allocateInstructor,
+  deallocateInstructor,
 };
 
 
