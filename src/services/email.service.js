@@ -5,20 +5,60 @@ const logger = require('../utils/logger');
 // Initialize Resend client
 const resend = config.RESEND_API_KEY ? new Resend(config.RESEND_API_KEY) : null;
 
-const sendMail = async ({ to, subject, html, from }) => {
+// resend.dev is Resend's shared testing domain — it has no reputation tied to
+// your app and gets filtered aggressively by mailbox providers. Warn loudly
+// on every startup/send if it's still in use so it doesn't get missed.
+const FALLBACK_SENDER = 'Get-Fit Gym <onboarding@resend.dev>';
+
+const isUsingTestDomain = (fromEmail) => fromEmail.includes('onboarding@resend.dev');
+
+/**
+ * Very small HTML -> plain text fallback. Good enough for transactional
+ * emails; strips tags, decodes a few common entities, collapses whitespace.
+ * Providing a text part alongside html improves deliverability and is
+ * required by some spam filters that penalize HTML-only messages.
+ */
+const htmlToText = (html) => {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+};
+
+const sendMail = async ({ to, subject, html, from, text }) => {
   if (!config.RESEND_API_KEY || !resend) {
     logger.warn('Resend API key not configured; skipping send');
     return;
   }
 
+  const fromEmail = from || config.RESEND_FROM_EMAIL || FALLBACK_SENDER;
+
+  if (isUsingTestDomain(fromEmail)) {
+    logger.warn(
+      'Sending from Resend test domain (onboarding@resend.dev). ' +
+      'This domain has no sender reputation and is heavily spam-filtered. ' +
+      'Verify your own domain in Resend and set RESEND_FROM_EMAIL to fix this.'
+    );
+  }
+
   try {
-    const fromEmail = from || config.RESEND_FROM_EMAIL || `Get-Fit Gym <onboarding@resend.dev>`;
-    
     const { data, error } = await resend.emails.send({
       from: fromEmail,
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
+      text: text || htmlToText(html),
     });
 
     if (error) {
@@ -253,7 +293,7 @@ const sendPaymentReceiptEmail = async (email, name, paymentData) => {
       <div style="background: #fff; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
         <div style="text-align: center; margin-bottom: 30px;">
           <div style="width: 80px; height: 80px; background: #4caf50; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-            <span style="color: #fff; font-size: 40px;">✓</span>
+            <span style="color: #fff; font-size: 40px;">&#10003;</span>
           </div>
           <h2 style="color: #4caf50; margin: 20px 0 10px 0;">Payment Successful!</h2>
           <p style="color: #666; margin: 0;">Thank you for your payment</p>
@@ -313,20 +353,18 @@ const sendPaymentReceiptEmail = async (email, name, paymentData) => {
     </body>
     </html>
   `;
-  await sendMail({ 
-    to: email, 
-    subject: `Payment Receipt - ${orderId || paymentId || 'Get-Fit Gym'}`, 
-    html 
+  await sendMail({
+    to: email,
+    subject: `Payment Receipt - ${orderId || paymentId || 'Get-Fit Gym'}`,
+    html
   });
 };
 
-module.exports = { 
-  sendVerificationEmail, 
-  sendPasswordResetEmail, 
-  sendWelcomeEmail, 
-  sendOTPEmail, 
+module.exports = {
+  sendVerificationEmail,
+  sendPasswordResetEmail,
+  sendWelcomeEmail,
+  sendOTPEmail,
   sendPasswordResetOTPEmail,
   sendPaymentReceiptEmail
 };
-
-
