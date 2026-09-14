@@ -81,7 +81,9 @@ const getPublicWorkouts = async (req, res, next) => {
         const grouped = {
             beginner: workouts.filter(w => w.difficulty === 'beginner'),
             intermediate: workouts.filter(w => w.difficulty === 'intermediate'),
-            advanced: workouts.filter(w => w.difficulty === 'advanced')
+            advanced: workouts.filter(w => w.difficulty === 'advanced'),
+            warmup: workouts.filter(w => w.difficulty === 'warmup'),
+            warmdown: workouts.filter(w => w.difficulty === 'warmdown')
         };
 
         res.json({

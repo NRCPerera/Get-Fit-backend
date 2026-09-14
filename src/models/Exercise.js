@@ -3,7 +3,7 @@ const { cloudinaryAssetSchema, defaultCloudinaryAsset } = require('./schemas/clo
 
 const MUSCLE_GROUPS = ['chest', 'back', 'legs', 'arms', 'shoulders', 'core', 'full-body'];
 const CATEGORIES = ['strength', 'cardio', 'flexibility', 'balance', 'sports'];
-const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
+const DIFFICULTIES = ['beginner', 'intermediate', 'advanced', 'warmup', 'warmdown'];
 
 const exerciseSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },

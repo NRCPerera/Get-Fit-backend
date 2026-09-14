@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
+const DIFFICULTIES = ['beginner', 'intermediate', 'advanced', 'warmup', 'warmdown'];
 const SCHEDULE_TYPES = ['1-day', '2-day', '3-day', '4-day', '5-day', '6-day', '7-day'];
 
 const exerciseSetRepSchema = new mongoose.Schema({
