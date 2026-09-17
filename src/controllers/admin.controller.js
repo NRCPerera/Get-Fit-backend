@@ -8,6 +8,8 @@ const Workout = require('../models/Workout');
 const TrainingSchedule = require('../models/TrainingSchedule');
 const InstructorAssignment = require('../models/InstructorAssignment');
 const { createFreeAssignment, cancelAssignment } = require('../services/instructorAssignment.service');
+const { uploadImage, deleteFromCloudinary } = require('../services/cloudinary.service');
+const { toCloudinaryUploadResult } = require('../utils/cloudinaryAsset');
 
 const getDashboardStats = async (req, res, next) => {
   try {
@@ -403,8 +405,18 @@ const createInstructor = async (req, res, next) => {
       return next(new ApiError('User with this email already exists', 400));
     }
 
+    // Handle profile photo upload if provided
+    let profilePictureData = undefined;
+    if (req.file) {
+      const uploadResult = await uploadImage(req.file, 'gym-management/profiles');
+      const asset = toCloudinaryUploadResult(uploadResult);
+      if (asset) {
+        profilePictureData = asset;
+      }
+    }
+
     // Create user with instructor role
-    const user = await User.create({
+    const userData = {
       name,
       email: email.toLowerCase(),
       password,
@@ -413,7 +425,13 @@ const createInstructor = async (req, res, next) => {
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
       isEmailVerified: true, // Admin-created instructors are pre-verified
       isActive: true
-    });
+    };
+
+    if (profilePictureData) {
+      userData.profilePicture = profilePictureData;
+    }
+
+    const user = await User.create(userData);
 
     // Create instructor profile
     const instructor = await Instructor.create({
@@ -928,8 +946,8 @@ const deleteInstructor = async (req, res, next) => {
     // Delete the instructor profile
     await Instructor.findByIdAndDelete(id);
 
-    // Revert the user's role back to 'member'
-    await User.findByIdAndUpdate(instructor.userId, { role: 'member' });
+    // Delete the associated user account entirely
+    await User.findByIdAndDelete(instructor.userId);
 
     res.json({
       success: true,

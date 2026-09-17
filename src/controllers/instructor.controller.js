@@ -991,8 +991,8 @@ const deleteInstructor = async (req, res, next) => {
     // Delete the instructor profile
     await Instructor.findByIdAndDelete(id);
 
-    // Revert the user's role back to 'member'
-    await User.findByIdAndUpdate(instructor.userId, { role: 'member' });
+    // Delete the associated user account entirely
+    await User.findByIdAndDelete(instructor.userId);
 
     res.json({
       success: true,
