@@ -14,7 +14,7 @@ router.post('/users/:id/suspend', suspendUser);
 router.post('/users/:id/activate', activateUser);
 router.get('/instructors', getAllInstructors);
 router.post('/instructors', uploadImage.single('image'), createInstructor);
-router.put('/instructors/:id', updateInstructor);
+router.put('/instructors/:id', uploadImage.single('image'), updateInstructor);
 router.delete('/instructors/:id', deleteInstructor);
 router.post('/instructors/:userId/approve', approveInstructor);
 router.get('/payments', getAllPayments);

@@ -867,6 +867,24 @@ const updateInstructor = async (req, res, next) => {
     if (email !== undefined) userUpdates.email = email.toLowerCase();
     if (phone !== undefined) userUpdates.phone = phone;
 
+    // Handle profile photo upload if provided
+    if (req.file) {
+      const user = await User.findById(instructor.userId);
+      // Delete old profile picture from Cloudinary if it exists
+      if (user?.profilePicture?.publicId) {
+        try {
+          await deleteFromCloudinary(user.profilePicture.publicId);
+        } catch (delErr) {
+          console.error('Failed to delete old profile image:', delErr);
+        }
+      }
+      const uploadResult = await uploadImage(req.file, 'gym-management/profiles');
+      const asset = toCloudinaryUploadResult(uploadResult);
+      if (asset) {
+        userUpdates.profilePicture = asset;
+      }
+    }
+
     if (Object.keys(userUpdates).length > 0) {
       // If email is being changed, check for duplicates
       if (userUpdates.email) {
