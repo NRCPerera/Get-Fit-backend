@@ -10,8 +10,9 @@ const { createPlan, getMyPlans, getPlanById, updatePlan, deletePlan, getClientPl
 router.post('/', verifyToken, validateRequest(createPlanValidator), createPlan);
 router.get('/me', verifyToken, getMyPlans);
 router.get('/mine/:id', verifyToken, getPlanById);
-router.put('/:id', verifyToken, requireInstructor, updatePlan);
-router.delete('/:id', verifyToken, requireInstructor, deletePlan);
+// Ownership is enforced in the controller, so members can manage plans they created themselves.
+router.put('/:id', verifyToken, updatePlan);
+router.delete('/:id', verifyToken, deletePlan);
 router.get('/clients', verifyToken, requireInstructor, getClientPlans);
 
 module.exports = router;

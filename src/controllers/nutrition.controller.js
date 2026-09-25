@@ -47,7 +47,24 @@ const updatePlan = async (req, res, next) => {
     const plan = await NutritionPlan.findById(req.params.id);
     if (!plan || !plan.isActive) return next(new ApiError('Plan not found', 404));
     if (!plan.createdBy.equals(req.user.id) && req.user.role !== 'admin') return next(new ApiError('Only creator can update', 403));
-    Object.assign(plan, req.body);
+    const editableFields = [
+      'title',
+      'description',
+      'meals',
+      'dailyCalories',
+      'dailyProtein',
+      'dailyCarbs',
+      'dailyFats',
+      'dietaryRestrictions',
+      'startDate',
+      'endDate',
+      'notes',
+    ];
+    editableFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        plan[field] = req.body[field];
+      }
+    });
     await plan.save();
     res.json({ success: true, message: 'Plan updated', data: { plan } });
   } catch (err) { next(err); }
