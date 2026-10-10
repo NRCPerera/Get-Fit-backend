@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { SCHEDULE_TYPES } = require('../utils/constants');
+const { MAX_SCHEDULE_DAYS, getScheduleDays } = require('../utils/constants');
 
 const SetRepSchema = new mongoose.Schema({
   sets: { type: Number, min: 1, required: true },
@@ -15,7 +15,7 @@ const ScheduleExerciseSchema = new mongoose.Schema({
   duration: { type: Number, min: 0 },
   restTime: { type: Number, min: 0 },
   notes: { type: String, trim: true },
-  scheduleDay: { type: Number, min: 1, max: 7 },
+  scheduleDay: { type: Number, min: 1 },
 }, { _id: false });
 
 const trainingScheduleSchema = new mongoose.Schema({
@@ -23,7 +23,14 @@ const trainingScheduleSchema = new mongoose.Schema({
   description: { type: String, trim: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-  scheduleType: { type: String, enum: SCHEDULE_TYPES, default: '1-day' },
+  scheduleType: {
+    type: String,
+    default: '1-day',
+    validate: {
+      validator: value => getScheduleDays(value) !== null,
+      message: `Schedule type must contain between 1 and ${MAX_SCHEDULE_DAYS} days`,
+    },
+  },
   exercises: [ScheduleExerciseSchema],
   startDate: { type: Date },
   endDate: { type: Date },
@@ -33,5 +40,19 @@ const trainingScheduleSchema = new mongoose.Schema({
   notes: { type: String, trim: true },
   isActive: { type: Boolean, default: true },
 }, { timestamps: true });
+
+trainingScheduleSchema.pre('validate', function validateExerciseScheduleDays() {
+  const scheduleDays = getScheduleDays(this.scheduleType);
+  if (!scheduleDays) return;
+
+  this.exercises.forEach((exercise, index) => {
+    if (exercise.scheduleDay > scheduleDays) {
+      this.invalidate(
+        `exercises.${index}.scheduleDay`,
+        `Exercise schedule day cannot be greater than ${scheduleDays}`
+      );
+    }
+  });
+});
 
 module.exports = mongoose.model('TrainingSchedule', trainingScheduleSchema);

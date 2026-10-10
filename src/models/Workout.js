@@ -1,15 +1,7 @@
 const mongoose = require('mongoose');
+const { MAX_SCHEDULE_DAYS, getScheduleDays } = require('../utils/constants');
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced', 'warmup', 'warmdown'];
-const MAX_SCHEDULE_DAYS = 365;
-
-const getScheduleDays = (scheduleType) => {
-    const match = typeof scheduleType === 'string' && scheduleType.match(/^([1-9]\d*)-day$/);
-    if (!match) return null;
-
-    const days = Number(match[1]);
-    return Number.isSafeInteger(days) && days <= MAX_SCHEDULE_DAYS ? days : null;
-};
 
 const exerciseSetRepSchema = new mongoose.Schema({
     sets: { type: String, required: true },
