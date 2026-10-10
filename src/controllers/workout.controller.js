@@ -183,7 +183,7 @@ const createWorkout = async (req, res, next) => {
         });
     } catch (error) {
         logger.error('Error creating workout:', error);
-        next(new ApiError(500, 'Failed to create workout'));
+        next(error.name === 'ValidationError' ? error : new ApiError('Failed to create workout', 500));
     }
 };
 
@@ -252,7 +252,7 @@ const updateWorkout = async (req, res, next) => {
         });
     } catch (error) {
         logger.error('Error updating workout:', error);
-        next(new ApiError(500, 'Failed to update workout'));
+        next(error.name === 'ValidationError' ? error : new ApiError('Failed to update workout', 500));
     }
 };
 

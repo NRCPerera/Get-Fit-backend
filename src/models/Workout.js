@@ -1,7 +1,15 @@
 const mongoose = require('mongoose');
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced', 'warmup', 'warmdown'];
-const SCHEDULE_TYPES = ['1-day', '2-day', '3-day', '4-day', '5-day', '6-day', '7-day'];
+const MAX_SCHEDULE_DAYS = 365;
+
+const getScheduleDays = (scheduleType) => {
+    const match = typeof scheduleType === 'string' && scheduleType.match(/^([1-9]\d*)-day$/);
+    if (!match) return null;
+
+    const days = Number(match[1]);
+    return Number.isSafeInteger(days) && days <= MAX_SCHEDULE_DAYS ? days : null;
+};
 
 const exerciseSetRepSchema = new mongoose.Schema({
     sets: { type: String, required: true },
@@ -14,7 +22,7 @@ const workoutExerciseSchema = new mongoose.Schema({
     setReps: [exerciseSetRepSchema],
     duration: { type: Number, min: 0 },
     restTime: { type: Number, min: 0, default: 60 },
-    scheduleDay: { type: Number, min: 1, max: 7, default: 1 },
+    scheduleDay: { type: Number, min: 1, default: 1 },
     notes: { type: String, trim: true }
 }, { _id: false });
 
@@ -24,7 +32,14 @@ const workoutSchema = new mongoose.Schema({
     difficulty: { type: String, enum: DIFFICULTIES, required: true },
     duration: { type: String, trim: true }, // e.g., "4 weeks", "8 weeks"
     workoutsPerWeek: { type: String, trim: true }, // e.g., "3x per week"
-    scheduleType: { type: String, enum: SCHEDULE_TYPES, default: '1-day' },
+    scheduleType: {
+        type: String,
+        default: '1-day',
+        validate: {
+            validator: value => getScheduleDays(value) !== null,
+            message: `Schedule type must contain between 1 and ${MAX_SCHEDULE_DAYS} days`
+        }
+    },
     exercises: [workoutExerciseSchema],
     goals: [{ type: String, trim: true }],
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -33,5 +48,19 @@ const workoutSchema = new mongoose.Schema({
 
 workoutSchema.index({ difficulty: 1 });
 workoutSchema.index({ isActive: 1 });
+
+workoutSchema.pre('validate', function validateExerciseScheduleDays() {
+    const scheduleDays = getScheduleDays(this.scheduleType);
+    if (!scheduleDays) return;
+
+    this.exercises.forEach((exercise, index) => {
+        if (exercise.scheduleDay > scheduleDays) {
+            this.invalidate(
+                `exercises.${index}.scheduleDay`,
+                `Exercise schedule day cannot be greater than ${scheduleDays}`
+            );
+        }
+    });
+});
 
 module.exports = mongoose.model('Workout', workoutSchema);
