@@ -1,15 +1,11 @@
 const mongoose = require('mongoose');
 const { cloudinaryAssetSchema, defaultCloudinaryAsset } = require('./schemas/cloudinaryAsset.schema');
 
-const MUSCLE_GROUPS = ['chest', 'back', 'legs', 'arms', 'shoulders', 'core', 'full-body'];
-const CATEGORIES = ['strength', 'cardio', 'flexibility', 'balance', 'sports'];
-const DIFFICULTIES = ['beginner', 'intermediate', 'advanced', 'warmup', 'warmdown'];
-
 const exerciseSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   description: { type: String, trim: true },
-  category: { type: String, enum: CATEGORIES },
-  difficulty: { type: String, enum: DIFFICULTIES },
+  category: { type: String, trim: true, maxlength: 100 },
+  difficulty: { type: String, trim: true, maxlength: 100 },
   duration: { type: Number, min: 0 },
   videoUrl: {
     type: cloudinaryAssetSchema,
@@ -20,7 +16,7 @@ const exerciseSchema = new mongoose.Schema({
     default: defaultCloudinaryAsset,
   },
   instructions: [{ type: String, trim: true }],
-  muscleGroups: [{ type: String, enum: MUSCLE_GROUPS }],
+  muscleGroups: [{ type: String, trim: true, maxlength: 100 }],
   equipment: [{ type: String, trim: true }],
   caloriesBurned: { type: Number, min: 0 },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
