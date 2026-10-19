@@ -5,6 +5,8 @@ const { uploadVideo, deleteFromCloudinary } = require('../services/cloudinary.se
 const { toCloudinaryUploadResult } = require('../utils/cloudinaryAsset');
 const { getMediaUrl } = require('../utils/mediaResponse');
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const formatExerciseResponse = (exercise) => {
   const exerciseObj = exercise.toObject ? exercise.toObject() : exercise;
   return {
@@ -33,7 +35,17 @@ const getAllExercises = async (req, res, next) => {
     if (status === 'inactive') filter.isActive = false;
     if (category) filter.category = category;
     if (difficulty) filter.difficulty = difficulty;
-    if (muscleGroups) filter.muscleGroups = { $in: muscleGroups.split(',') };
+    if (muscleGroups) {
+      const muscleGroupFilters = muscleGroups
+        .split(',')
+        .map((group) => group.trim())
+        .filter(Boolean)
+        .map((group) => new RegExp(`^${escapeRegExp(group)}$`, 'i'));
+
+      if (muscleGroupFilters.length > 0) {
+        filter.muscleGroups = { $in: muscleGroupFilters };
+      }
+    }
     if (q) filter.name = { $regex: q, $options: 'i' };
 
     const numericPage = parseInt(page);
